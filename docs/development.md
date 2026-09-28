@@ -84,7 +84,7 @@ QA：`scripts/qa_transfers_macos.py --directory <目录> --fixture <fixture 目�
 - `resize_local` 只在本地、可信提示符未收到输入、光标在首行、原 history 为空且其余可见行全空时，清除本次 resize 刚产生的 history（未清屏 zsh RPROMPT 的 reflow 场景）；有真实 scrollback、编辑中的命令或下方输出时保持原网格语义。输入状态只保存两个布尔值，提交后的新提示符才复位。
 - `TerminalView` 只接受与测量尺寸相同的网格帧，并在每个布局帧清空 retained canvas，避免 AppKit 动画期间的旧字形残留。
 
-## 标签栏与 macOS 标题栏
+## 标签栏与平台标题栏
 
 - `ui/tab_reorder.rs` 在顶栏内记录手势 UUID、源标签 ID、水平位移和候选插入位置。标签命中区域用 occlude 隔离 GPUI 事件，窗口级捕获监听处理移动与释放；横向位移达 4px 才进入排序，按可见标签中点计算插入位置，栏外释放和 Esc/失焦取消。滚轮事件显式转交标签 ScrollHandle，边缘滚动随手势结束停止；排序后按 UUID 恢复活动索引，不将排序误当成会话切换触发自动滚回。关闭按钮有独立命中区域。
 - 原生 `TitleBar` 的内部行禁止收缩，`min_w_0` 无法限制其最小内容宽度：标题栏内容在分配区域内定位，避免标签总宽度参与祖先最小尺寸计算；活动标签仅在首次显示与尺寸变化后的测量完成后补一次定位，不在每次输出重绘时重复。
@@ -96,7 +96,7 @@ QA：`scripts/qa_transfers_macos.py --directory <目录> --fixture <fixture 目�
 ## 窗口菜单与 About
 
 - macOS `install_system_menu` 显式注册本地化的 NSApplication.windowsMenu，并使用标准 performMiniaturize:/performZoom: responder action（锁定版 GPUI 只会自动注册字面名称为 Window 的菜单）。顶栏/快捷键经保留的 NSMenu 和所属 NSView 打开真正的系统菜单，在前台执行器中释放 GPUI 更新借用后进入 AppKit 菜单循环；系统负责平铺、居中、全屏与还原选项。
-- Windows 使用 `Some(TitlebarOptions::default())` 保留 Win32 非客户区标题栏；客户区标签工具行使用普通容器，不渲染 `gpui_component::TitleBar` 的自绘控制按钮和拖动监听。原生关闭请求通过现有 `on_window_should_close` 进入文件/传输确认和最终工作区保存流程。验收需覆盖三个按钮、双击最大化/还原、拖动、系统菜单、Alt+F4 和关闭取消；本地 macOS 编译不代表 Windows 实机通过。
+- Windows 使用 `Some(TitlebarOptions::default())` 保留 Win32 非客户区标题栏及系统按钮，客户区标签工具行继续使用普通容器，不渲染 `gpui_component::TitleBar` 的自绘按钮。GPUI 0.2.2 的 `Window::start_window_move` 在 Windows 没有平台实现（只用于 Wayland/X11）；`InteractiveElement::window_control_area(WindowControlArea::Drag)` 则把元素命中区交给 Windows `WM_NCHITTEST`，且该回调在 `hide_title_bar` 判断之前执行，因此原生标题栏模式仍会返回 `HTCAPTION` 并保留系统拖动、贴靠及双击最大化/还原。Workbench 只在 Windows 为顶栏父区域注册 Drag；标签和 `header_control` 使用 `occlude` 排除排序、关闭、图标及固定按钮，弹窗全屏遮罩同样阻断后方拖窗命中，不增加会抢占这些交互的 mouse-down 监听。原生关闭请求仍通过现有 `on_window_should_close` 进入文件/传输确认和最终工作区保存流程。验收需覆盖空白区拖动与双击、标签排序、按钮、弹窗、三个系统按钮、贴靠、系统菜单、Alt+F4 和关闭取消；本地 macOS 编译不代表 Windows 实机通过。
 - `window_layout.rs`、尺寸表单和直接几何接口保留给其它平台与几何回归；macOS 日常菜单使用系统 WindowMenuProbe 和菜单只读快照。Windows 适配未实机验证，Linux 不新增本地 VM/容器。
 - 应用菜单以本地化的“关于 MantaSH / About MantaSH”为首项，接分隔线、“设置”、Services 和退出。`OpenAbout` 在释放 GPUI 更新借用后调用系统 UI：macOS 使用 `orderFrontStandardAboutPanelWithOptions:` 传入应用名和 `APP_VERSION`（已打包 `.app` 的图标来自 `Info.plist`）；Windows 使用绑定当前窗口 HWND 的 ShellAboutW。About 是系统标准面板，不进入 Workbench 的弹窗栈；设置页仍显示版本。`scripts/qa_about_menu_macos.py --binary target/debug/mantash --directory <全新隔离目录>` 在隔离原生窗口检查真实 AppKit 菜单、独立系统面板、版本文本和设置弹窗保持状态，不代替人工物理点击或 Windows 实机验证。
 

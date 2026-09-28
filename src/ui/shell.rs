@@ -2212,9 +2212,9 @@ impl Render for Workbench {
                         })),
                 );
         }
-        // Size content inside TitleBar's allocated region. The absolute inner row
-        // cannot contribute tab widths to its non-shrinking ancestor's minimum size.
-        // The native component still owns traffic lights, window controls and dragging.
+        // Keep tab widths out of the toolbar's intrinsic minimum size. Non-Windows
+        // TitleBar owns its platform chrome; Windows keeps native non-client controls
+        // and maps only the unoccluded client-area header to caption dragging.
         let logo = div().flex().items_center().flex_shrink_0().px_2().child(
             gpui::svg()
                 .path("mantash-mark.svg")
@@ -2231,6 +2231,12 @@ impl Render for Workbench {
             .child(logo)
             .child(self.render_tabs(window, cx))
             .id("workbench-titlebar-header")
+            // On Windows GPUI maps this control hitbox to HTCAPTION even when
+            // the native non-client title bar is retained. Tabs and header
+            // controls occlude their own bounds, so only blank space moves the window.
+            .when(cfg!(target_os = "windows"), |header| {
+                header.window_control_area(WindowControlArea::Drag)
+            })
             .on_click(|event, _, cx| {
                 if event.click_count() == 2 {
                     // AppKit's title bar owns the configured Zoom action.
