@@ -1,4 +1,6 @@
 //! Native desktop entry point.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use gpui::prelude::*;
 use gpui::{
     App, Application, AssetSource, Bounds, SharedString, WindowBounds, WindowOptions, px, size,

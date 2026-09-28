@@ -16,6 +16,8 @@ rustup show active-toolchain
 
 脚本检查格式、核心与真实 ConPTY 测试，再检查并编译桌面程序；失败即停止，不执行发布打包或签名。若 PowerShell 策略阻止运行脚本，可逐条执行脚本中的 Cargo 命令，不必全局修改执行策略。
 
+桌面入口在 Windows 的 debug/release 构建中均使用 GUI 子系统，从资源管理器或开始菜单启动时不创建额外控制台窗口；应用内本地 Shell 仍通过 ConPTY 运行。打包脚本检查 EXE 的 PE 子系统字段，拒绝将控制台子系统程序打入安装器。
+
 ## 隔离运行
 
 ```powershell
@@ -29,6 +31,7 @@ cargo run --locked
 
 | 范围 | 操作与预期 |
 |---|---|
+| 启动 | 从资源管理器和开始菜单启动，仅出现 MantaSH 窗口，不弹出额外命令窗口；应用内本地终端仍可输入和执行命令 |
 | 本地 Shell / ConPTY | PowerShell 7、系统 PowerShell、CMD 回退；中文输入、粘贴、Ctrl+C、颜色、滚动、Vim/less |
 | 字体与 DPI | 默认 14px/12px，100%、125%、150%、200% 缩放及字号放大无截断 |
 | SSH 与凭据 | 密码、首次/变化指纹、取消、断线/重连、认证后记忆与重启复用 |

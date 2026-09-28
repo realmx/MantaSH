@@ -117,8 +117,32 @@ def macos_app(stage: Path, binary: Path, version: str, target: str) -> Path:
     return app
 
 
+def validate_windows_gui(binary: Path) -> None:
+    """Reject console executables before packaging; PE32 and PE32+ share this field."""
+    with binary.open("rb") as source:
+        dos = source.read(64)
+        if len(dos) != 64 or dos[:2] != b"MZ":
+            raise ValueError(f"Invalid Windows executable: {binary}")
+        pe_offset = int.from_bytes(dos[60:64], "little")
+        if pe_offset < 64:
+            raise ValueError(f"Invalid PE header offset: {binary}")
+        source.seek(pe_offset)
+        header = source.read(24)
+        if len(header) != 24 or header[:4] != b"PE\0\0":
+            raise ValueError(f"Invalid PE header: {binary}")
+        optional_size = int.from_bytes(header[20:22], "little")
+        optional = source.read(optional_size)
+        if (optional_size < 70 or len(optional) != optional_size
+                or int.from_bytes(optional[:2], "little") not in (0x10B, 0x20B)):
+            raise ValueError(f"Invalid PE optional header: {binary}")
+        subsystem = int.from_bytes(optional[68:70], "little")
+        if subsystem != 2:  # IMAGE_SUBSYSTEM_WINDOWS_GUI
+            raise ValueError(f"MantaSH must use Windows GUI subsystem 2, got {subsystem}: {binary}")
+
+
 def windows_tree(stage: Path, binary: Path, version: str, target: str) -> Path:
     """Prepare the executable and notices for the Windows installer."""
+    validate_windows_gui(binary)
     root = stage / "MantaSH"
     executable = root / "mantash.exe"
     copy_file(binary, executable)

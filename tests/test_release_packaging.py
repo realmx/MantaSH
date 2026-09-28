@@ -342,6 +342,41 @@ class ReleasePackageTests(unittest.TestCase):
             self.assertEqual(sorted(item.name for item in (root / "dist").iterdir()),
                              [path.name, path.name + ".sha256"])
 
+    @staticmethod
+    def windows_binary(magic=0x20B, subsystem=2):
+        """Minimal PE headers for packaging tests; not an executable program."""
+        optional_size = 224 if magic == 0x10B else 240
+        data = bytearray(128 + 24 + optional_size)
+        data[:2] = b"MZ"
+        data[60:64] = (128).to_bytes(4, "little")
+        data[128:132] = b"PE\0\0"
+        data[148:150] = optional_size.to_bytes(2, "little")
+        data[152:154] = magic.to_bytes(2, "little")
+        data[220:222] = subsystem.to_bytes(2, "little")
+        return bytes(data)
+
+    def test_windows_console_binary_is_rejected_before_staging(self):
+        for magic in (0x10B, 0x20B):
+            with self.subTest(magic=magic), TemporaryDirectory() as directory:
+                root = Path(directory)
+                binary = root / "mantash.exe"
+                binary.write_bytes(self.windows_binary(magic, subsystem=3))
+                with self.assertRaisesRegex(ValueError, "GUI subsystem 2, got 3"):
+                    package_release.windows_tree(root / "stage", binary, "1.2.3", "x86_64-pc-windows-msvc")
+                self.assertFalse((root / "stage").exists())
+
+    def test_windows_gui_header_validation_rejects_malformed_input(self):
+        invalid = [b"MZ", self.windows_binary()[:170], self.windows_binary(magic=0)]
+        missing_signature = bytearray(self.windows_binary())
+        missing_signature[128:132] = b"BAD!"
+        invalid.append(bytes(missing_signature))
+        for data in invalid:
+            with self.subTest(length=len(data)), TemporaryDirectory() as directory:
+                binary = Path(directory) / "mantash.exe"
+                binary.write_bytes(data)
+                with self.assertRaises(ValueError):
+                    package_release.validate_windows_gui(binary)
+
     def test_windows_installer_contains_staged_binary_and_has_checksum(self):
         for target, name, arch in (("i686-pc-windows-msvc", "x86", "x86compatible"),
                                    ("x86_64-pc-windows-msvc", "x64", "x64compatible"),
@@ -349,7 +384,7 @@ class ReleasePackageTests(unittest.TestCase):
             with self.subTest(name=name), TemporaryDirectory() as directory:
                 root = Path(directory)
                 binary = root / "mantash.exe"
-                binary.write_bytes(b"MZ test binary")
+                binary.write_bytes(self.windows_binary(0x10B if name == "x86" else 0x20B))
                 calls = []
                 def compile_installer(command, **_):
                     calls.append(command)
