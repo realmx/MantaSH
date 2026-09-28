@@ -2349,8 +2349,6 @@ impl Render for Workbench {
                         ),
                     ),
             );
-        // The transparent Windows title bar retains native HTMINBUTTON,
-        // HTMAXBUTTON and HTCLOSE routing without a second OS caption row.
         let toolbar = TitleBar::new()
             .h(px(self.toolbar_height()))
             .bg(p.surface)

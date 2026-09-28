@@ -36,6 +36,19 @@ pub fn find_executable(name: &str) -> Option<PathBuf> {
         })
         .find(|p| p.is_file())
 }
+/// Locate Git for Windows' Bash even when Git was installed outside PATH.
+#[cfg(windows)]
+fn git_bash() -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(program_files) = std::env::var_os("ProgramFiles") {
+        candidates.push(PathBuf::from(&program_files).join("Git/bin/bash.exe"));
+        candidates.push(PathBuf::from(program_files).join("Git/usr/bin/bash.exe"));
+    }
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        candidates.push(PathBuf::from(local_app_data).join("Programs/Git/bin/bash.exe"));
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
 /// Prefer the user's configured Unix shell or available Windows PowerShell.
 pub fn default_shell() -> String {
     if cfg!(windows) {
@@ -64,6 +77,13 @@ pub fn shells() -> Vec<String> {
             if !found.contains(&s) {
                 found.push(s);
             }
+        }
+    }
+    #[cfg(windows)]
+    if let Some(path) = git_bash() {
+        let path = path.to_string_lossy().into_owned();
+        if !found.contains(&path) {
+            found.push(path);
         }
     }
     found
