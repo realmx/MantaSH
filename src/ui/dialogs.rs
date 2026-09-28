@@ -1913,22 +1913,13 @@ impl Workbench {
                             ),
                     );
                 }
-                // Keep the release identity in the user-facing settings surface rather than the crowded title bar.
-                body = body.child(
-                    div()
-                        .pt(px(theme::SPACE_SECTION))
-                        .border_t_1()
-                        .border_color(p.border)
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .text_color(p.muted)
-                        .child("MantaSH")
-                        .child(format!("{} {}", self.t("version"), crate::APP_VERSION)),
+                // Keep the running version visible outside the scrolling settings body.
+                footer = footer.items_center().child(
+                    div().flex_1().text_color(p.muted).child(
+                        self.t("settings_version")
+                            .replace("{version}", crate::APP_VERSION),
+                    ),
                 );
-                // The body ends with the font rows; workspace restore is always
-                // on, so the footer only offers restoring the visible
-                // appearance settings to their defaults.
                 footer = footer.child(
                     self.button("reset-settings", self.t("reset_defaults"))
                         .on_click(cx.listener(|this, _, w, cx| {

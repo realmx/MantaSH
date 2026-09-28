@@ -1,7 +1,9 @@
 //! Selected paired workbench: native terminals with a contextual SSH tool page.
 use super::*;
 use dialogs::CloseTarget;
-use gpui_component::{IconName, Sizable, TitleBar, input::Input};
+#[cfg(not(target_os = "windows"))]
+use gpui_component::TitleBar;
+use gpui_component::{IconName, Sizable, input::Input};
 use std::rc::Rc;
 use tools::{
     FileMenuCopy, FileMenuDelete, FileMenuDownload, FileMenuEdit, FileMenuMkdir, FileMenuPaste,
@@ -2307,9 +2309,9 @@ impl Render for Workbench {
                             "theme-toggle",
                             self.button("theme-toggle", "")
                                 .svg_icon(if self.prefs.theme == Theme::Night {
-                                    "icons/moon.svg"
-                                } else {
                                     "icons/sun.svg"
+                                } else {
+                                    "icons/moon.svg"
                                 })
                                 .ghost()
                                 .h(px(self.controls_height()))
@@ -2342,12 +2344,29 @@ impl Render for Workbench {
                         ),
                     ),
             );
-        let toolbar = TitleBar::new()
-            .h(px(self.toolbar_height()))
-            .bg(p.surface)
-            .border_b_1()
-            .border_color(p.border)
-            .child(div().relative().flex_1().min_w_0().h_full().child(header));
+        let toolbar = {
+            #[cfg(target_os = "windows")]
+            {
+                div()
+                    .flex()
+                    .items_center()
+                    .flex_shrink_0()
+                    .h(px(self.toolbar_height()))
+                    .bg(p.surface)
+                    .border_b_1()
+                    .border_color(p.border)
+                    .child(div().relative().flex_1().min_w_0().h_full().child(header))
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                TitleBar::new()
+                    .h(px(self.toolbar_height()))
+                    .bg(p.surface)
+                    .border_b_1()
+                    .border_color(p.border)
+                    .child(div().relative().flex_1().min_w_0().h_full().child(header))
+            }
+        };
         let entity = cx.entity();
         let root = div()
             .id("mantash-workbench")

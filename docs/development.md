@@ -96,6 +96,7 @@ QA：`scripts/qa_transfers_macos.py --directory <目录> --fixture <fixture 目�
 ## 窗口菜单与 About
 
 - macOS `install_system_menu` 显式注册本地化的 NSApplication.windowsMenu，并使用标准 performMiniaturize:/performZoom: responder action（锁定版 GPUI 只会自动注册字面名称为 Window 的菜单）。顶栏/快捷键经保留的 NSMenu 和所属 NSView 打开真正的系统菜单，在前台执行器中释放 GPUI 更新借用后进入 AppKit 菜单循环；系统负责平铺、居中、全屏与还原选项。
+- Windows 使用 `Some(TitlebarOptions::default())` 保留 Win32 非客户区标题栏；客户区标签工具行使用普通容器，不渲染 `gpui_component::TitleBar` 的自绘控制按钮和拖动监听。原生关闭请求通过现有 `on_window_should_close` 进入文件/传输确认和最终工作区保存流程。验收需覆盖三个按钮、双击最大化/还原、拖动、系统菜单、Alt+F4 和关闭取消；本地 macOS 编译不代表 Windows 实机通过。
 - `window_layout.rs`、尺寸表单和直接几何接口保留给其它平台与几何回归；macOS 日常菜单使用系统 WindowMenuProbe 和菜单只读快照。Windows 适配未实机验证，Linux 不新增本地 VM/容器。
 - 应用菜单以本地化的“关于 MantaSH / About MantaSH”为首项，接分隔线、“设置”、Services 和退出。`OpenAbout` 在释放 GPUI 更新借用后调用系统 UI：macOS 使用 `orderFrontStandardAboutPanelWithOptions:` 传入应用名和 `APP_VERSION`（已打包 `.app` 的图标来自 `Info.plist`）；Windows 使用绑定当前窗口 HWND 的 ShellAboutW。About 是系统标准面板，不进入 Workbench 的弹窗栈；设置页仍显示版本。`scripts/qa_about_menu_macos.py --binary target/debug/mantash --directory <全新隔离目录>` 在隔离原生窗口检查真实 AppKit 菜单、独立系统面板、版本文本和设置弹窗保持状态，不代替人工物理点击或 Windows 实机验证。
 

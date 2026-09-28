@@ -9,7 +9,7 @@ brew install realmx/taps/mantash --cask
 brew upgrade --cask mantash
 ```
 
-源码基准版本为 `1.0.0`；发布版本以 tag 和 Release 页为准，设置页底部可查看当前运行版本。macOS 包采用 ad-hoc 签名、未经 Apple 公证；Windows 安装器未签名，可能触发 SmartScreen。Windows 的运行和安装体验尚未实机验收。
+源码基准版本为 `1.0.0`；发布版本以 tag 和 Release 页为准，设置弹窗 footer 左侧以“版本x.x.x”（例如“版本1.0.0”）显示当前运行版本。macOS 包采用 ad-hoc 签名、未经 Apple 公证；Windows 安装器未签名，可能触发 SmartScreen。Windows 的运行和安装体验尚未实机验收。
 
 ### macOS 无法直接打开
 
@@ -92,7 +92,7 @@ SSH 标签通过终端工具栏或 `Cmd/Ctrl+2` 打开共享历史；本地终�
 
 连接资料、外观偏好、工具宽度与工作区存于 MantaSH 数据目录；标签和布局自动保存。拖动 SSH 右栏分隔线可调宽度；聚焦分隔线后方向键每次调整 8px，Shift+方向键每次 32px，Home/End 到达边界，双击恢复默认 280px，显示上限为窗口宽度的 50%。重启时本地会话创建新 Shell，SSH 等待手动连接，编辑草稿不恢复。数据异常时原数据库不会被清空，处理方法见[排障](troubleshooting.md)；路径和格式见[数据文档](data.md)。
 
-macOS 使用系统“窗口”菜单管理缩放、平铺和全屏，`Cmd+Shift+0` 打开同一菜单；具体选项取决于系统版本。Windows 提供备用窗口操作界面，实机行为仍待验收。
+macOS 使用系统“窗口”菜单管理缩放、平铺和全屏，`Cmd+Shift+0` 打开同一菜单；具体选项取决于系统版本。Windows 使用原生系统标题栏，右上角三个按钮分别为最小化、最大化/还原、关闭；最大化与全屏是不同操作。标题栏拖动、双击和系统窗口菜单由 Windows 处理。关闭时仍检查未保存文件和正在进行的传输。应用内尺寸和全屏操作界面继续保留；Windows 实机行为仍待验收。
 
 | 操作 | macOS | Windows |
 |---|---|---|

@@ -81,7 +81,12 @@ fn main() {
                     focus: !background_qa,
                     show: !hidden_qa,
                     window_min_size: Some(size(px(960.), px(640.))),
-                    titlebar: Some(gpui_component::TitleBar::title_bar_options()),
+                    titlebar: if cfg!(target_os = "windows") {
+                        // Keep the Win32 non-client title bar and its native caption buttons.
+                        Some(gpui::TitlebarOptions::default())
+                    } else {
+                        Some(gpui_component::TitleBar::title_bar_options())
+                    },
                     app_id: Some(
                         if background_qa {
                             "app.mantash.MantaSH.NativeQA"

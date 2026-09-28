@@ -303,6 +303,7 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "apply" => ("应用", "Apply"),
         "reset_defaults" => ("恢复默认", "Restore defaults"),
         "version" => ("版本", "Version"),
+        "settings_version" => ("版本{version}", "Version {version}"),
         "connected" => ("已连接", "Connected"),
         "connecting" => ("连接中", "Connecting"),
         "authenticating" => ("正在认证", "Authenticating"),
