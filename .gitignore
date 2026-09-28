@@ -1,0 +1,17 @@
+/target/
+/dist/
+/artifacts/runtime/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+.DS_Store
+*.log
+.env
+__pycache__/
+*.py[cod]
+.zcode/
+.zcodeignore
+.pi/
+
+credentials.key
+*.sqlite3-journal

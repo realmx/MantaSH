@@ -1,0 +1,2 @@
+# Optional tooling for reproducible logo assets and native screenshot QA, not a runtime dependency.
+Pillow==12.3.0

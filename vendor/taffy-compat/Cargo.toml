@@ -1,0 +1,33 @@
+[package]
+name = "taffy"
+version = "0.9.0"
+edition = "2021"
+rust-version = "1.65"
+description = "Compatibility facade for the GPUI-pinned Taffy version"
+license = "MIT"
+repository = "https://github.com/DioxusLabs/taffy"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+alloc = ["taffy_impl/alloc"]
+block_layout = ["taffy_impl/block_layout"]
+calc = ["taffy_impl/calc"]
+content_size = ["taffy_impl/content_size"]
+default = ["taffy_impl/default"]
+detailed_layout_info = ["taffy_impl/detailed_layout_info"]
+debug = ["taffy_impl/debug"]
+flexbox = ["taffy_impl/flexbox"]
+grid = ["taffy_impl/grid"]
+profile = ["taffy_impl/profile"]
+serde = ["taffy_impl/serde"]
+std = ["taffy_impl/std"]
+strict_provenance = ["taffy_impl/strict_provenance"]
+taffy_tree = ["taffy_impl/taffy_tree"]
+
+[dependencies.taffy_impl]
+package = "taffy"
+git = "https://github.com/DioxusLabs/taffy"
+rev = "8f30e394106af09dbf131d184e3cff25d20cc207"
+default-features = false

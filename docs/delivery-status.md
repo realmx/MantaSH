@@ -1,0 +1,16 @@
+# 交付状态
+
+`1.0.0` 是首个公开产品版本。本页记录代码接入和可核实的交付结果；人工验收范围单独见[验收记录](acceptance.md)，不以构建成功推断平台实机通过。
+
+| 范围 | 当前状态 | 详情 |
+|---|---|---|
+| 本地终端、SSH/SFTP、编辑、传输、历史、Linux 监控、工作区恢复 | 接入真实后端，自动化覆盖核心数据与协议流程 | [功能范围](features.md)、[实现映射](implementation.md) |
+| macOS 原生输入、分屏、文件和窗口操作 | 有用户人工确认；后续版本需按实际环境回归 | [验收记录](acceptance.md) |
+| Linux SSH 主机连接、系统面板、进程和端口 | 已确认的人工范围内可用，不等于所有服务器环境均通过 | [验收记录](acceptance.md) |
+| Windows x86/x64/ARM64 | 安装器可由 Actions 构建；ConPTY、DPI、输入法、安装与完整运行未实机验收 | [Windows 检查清单](windows.md) |
+| 版本与 Release | `Cargo.toml` 基准 `1.0.0`；`master` 的纯文档更新不建 tag，发布相关更新由 workflow 生成 tag。正式 [v1.0.0 Release](https://github.com/realmx/MantaSH/releases/tag/v1.0.0) 有五包及各自 `.sha256` | [发布文档](release.md) |
+| Homebrew tap | `realmx/taps/mantash` 的 1.0.0 cask 已更新；本机 arm64 实测 `brew install` 完成，应用版本与 ad-hoc 签名可核对 | [macOS 安装](macos.md) |
+
+发布包面向 macOS（arm64/x64 DMG，ad-hoc 签名、未公证）和 Windows（x86/x64/ARM64 Inno Setup 安装器，未代码签名），不提供便携 ZIP。macOS Gatekeeper 可阻止新装包首次启动；Homebrew 安装成功不等于已完成系统“仍要打开”后的启动验收。Windows 的 SmartScreen 与实机使用亦未验证。下载与放行方法见[用户手册](user-guide.md)，真实包以 Release 附件为准。
+
+CI、回环服务器、隔离原生 QA、截图和物理键鼠属于不同证据，具体通过范围应与所用源码和脚本对应。文档与依赖许可见[索引](README.md)；出现新缺陷时记录系统、架构、工具链、步骤、预期、实际结果，再针对目标平台修复。

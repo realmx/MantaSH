@@ -1,0 +1,55 @@
+name: Master release version tag
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: master-version-tag
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Tag release-relevant changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pushed source and version tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Refresh master and version tags
+        run: git fetch origin master --tags
+      - name: Tag changes since the last release (skip documentation-only updates)
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_version.py tag
+      - name: Diagnose rejected tag with the workflow token
+        if: failure() && steps.tag.outcome == 'failure'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          # Read-only diagnostics; never print credentials or bypass ref protections.
+          gh api "repos/${GITHUB_REPOSITORY}/rulesets?includes_parents=true" || true
+          gh api "repos/${GITHUB_REPOSITORY}/rulesets/rule-suites?time_period=month&rule_suite_result=all&per_page=10" || true
+          gh api "repos/${GITHUB_REPOSITORY}/immutable-releases" || true
+          gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags" --jq '.[] | {ref, sha: .object.sha}' || true
+      - name: Dispatch release for new tag
+        if: steps.tag.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if gh workflow run release.yml --ref "v${VERSION}" --field platform=all; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
