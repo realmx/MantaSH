@@ -3,6 +3,7 @@ mod i18n;
 mod shell;
 mod terminal_view;
 pub mod theme;
+mod windows_caption;
 pub use shell::bind_keys;
 mod connection_reorder;
 mod controls;
@@ -257,6 +258,7 @@ pub(super) struct TabStrip {
     font_size: f32,
     language: Language,
     drag: Option<tab_reorder::TabDrag>,
+    caption_drag: Option<Point<Pixels>>,
     suppress_click: Option<Id>,
     completed_drags: u64,
     #[cfg(target_os = "macos")]

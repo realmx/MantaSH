@@ -1,8 +1,7 @@
 //! Selected paired workbench: native terminals with a contextual SSH tool page.
 use super::*;
 use dialogs::CloseTarget;
-use gpui_component::TitleBar;
-use gpui_component::{IconName, Sizable, input::Input};
+use gpui_component::{IconName, InteractiveElementExt, Sizable, TitleBar, input::Input};
 use std::rc::Rc;
 use tools::{
     FileMenuCopy, FileMenuDelete, FileMenuDownload, FileMenuEdit, FileMenuMkdir, FileMenuPaste,
@@ -355,7 +354,7 @@ impl Workbench {
         Input::new(input).small().h(px(self.input_height()))
     }
     /// Keep header actions outside the scroll clip; QA observes their actual native hit areas.
-    fn header_control(
+    pub(super) fn header_control(
         &self,
         _name: &'static str,
         control: impl IntoElement,
@@ -2211,9 +2210,8 @@ impl Render for Workbench {
                         })),
                 );
         }
-        // Keep tab widths out of the toolbar's intrinsic minimum size. Non-Windows
-        // TitleBar owns its platform chrome; Windows keeps native non-client controls
-        // and maps only the unoccluded client-area header to caption dragging.
+        // Keep tab widths out of the toolbar's intrinsic minimum size.
+        // Windows keeps a client-drawn caption with explicitly queued native operations.
         let logo = div().flex().items_center().flex_shrink_0().px_2().child(
             gpui::svg()
                 .path("mantash-mark.svg")
@@ -2230,11 +2228,53 @@ impl Render for Workbench {
             .child(logo)
             .child(self.render_tabs(window, cx))
             .id("workbench-titlebar-header")
-            // On Windows GPUI maps this control hitbox to HTCAPTION even when
-            // the native non-client title bar is retained. Tabs and header
-            // controls occlude their own bounds, so only blank space moves the window.
             .when(cfg!(target_os = "windows"), |header| {
-                header.window_control_area(WindowControlArea::Drag)
+                header
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseDownEvent, _, _| {
+                            this.tab_strip.caption_drag = if this.modal.is_none() {
+                                Some(event.position)
+                            } else {
+                                None
+                            };
+                        }),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, _| this.tab_strip.caption_drag = None),
+                    )
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, _| this.tab_strip.caption_drag = None),
+                    )
+                    .on_mouse_down_out(
+                        cx.listener(|this, _, _, _| this.tab_strip.caption_drag = None),
+                    )
+                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                        if event.pressed_button != Some(MouseButton::Left)
+                            || !window.is_window_active()
+                            || this.modal.is_some()
+                        {
+                            this.tab_strip.caption_drag = None;
+                            return;
+                        }
+                        if this.tab_strip.caption_drag.is_some_and(|start| {
+                            (event.position.x - start.x).abs() >= px(4.)
+                                || (event.position.y - start.y).abs() >= px(4.)
+                        }) {
+                            this.tab_strip.caption_drag = None;
+                            this.caption_command(window, windows_caption::CaptionCommand::Move, cx);
+                        }
+                    }))
+                    .on_double_click(cx.listener(|this, _, window, cx| {
+                        this.tab_strip.caption_drag = None;
+                        this.caption_command(
+                            window,
+                            windows_caption::CaptionCommand::ToggleMaximize,
+                            cx,
+                        );
+                    }))
             })
             .on_click(|event, _, cx| {
                 if event.click_count() == 2 {
@@ -2349,12 +2389,27 @@ impl Render for Workbench {
                         ),
                     ),
             );
-        let toolbar = TitleBar::new()
-            .h(px(self.toolbar_height()))
-            .bg(p.surface)
-            .border_b_1()
-            .border_color(p.border)
-            .child(div().relative().flex_1().min_w_0().h_full().child(header));
+        let toolbar = if cfg!(target_os = "windows") {
+            div()
+                .flex()
+                .items_center()
+                .flex_shrink_0()
+                .h(px(self.toolbar_height()))
+                .bg(p.surface)
+                .border_b_1()
+                .border_color(p.border)
+                .child(div().relative().flex_1().min_w_0().h_full().child(header))
+                .child(self.windows_caption_buttons(window, cx))
+                .into_any_element()
+        } else {
+            TitleBar::new()
+                .h(px(self.toolbar_height()))
+                .bg(p.surface)
+                .border_b_1()
+                .border_color(p.border)
+                .child(div().relative().flex_1().min_w_0().h_full().child(header))
+                .into_any_element()
+        };
         let entity = cx.entity();
         let root = div()
             .id("mantash-workbench")
