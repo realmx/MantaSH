@@ -21,12 +21,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Git tag pushes use this job's GITHUB_TOKEN; no separate release credential.
+          persist-credentials: true
       - name: Refresh master and version tags
         run: git fetch origin master --tags
       - name: Tag changes since the last release (skip documentation-only updates)
         id: tag
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release_version.py tag
       - name: Diagnose rejected tag with the workflow token
         if: failure() && steps.tag.outcome == 'failure'

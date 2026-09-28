@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import csv
 import io
-import json
 import os
 from pathlib import Path
 import re
@@ -115,19 +114,18 @@ def stage(root: Path, version: str) -> None:
 
 
 def create_tag(tag: str, commit: str) -> None:
-    """Create the exact ref with the workflow token; surface API errors without fallback."""
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        repository = os.environ.get("GITHUB_REPOSITORY", "")
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) or not os.environ.get("GH_TOKEN"):
-            raise ValueError("Tag creation requires GITHUB_REPOSITORY and the workflow GH_TOKEN")
-        subprocess.run(
-            ["gh", "api", "--include", "--method", "POST", f"repos/{repository}/git/refs", "--input", "-"],
-            input=json.dumps({"ref": f"refs/tags/{tag}", "sha": commit}), text=True, check=True,
-        )
-        git("tag", tag, commit)
-    else:
-        git("tag", tag, commit)
-        subprocess.run(["git", "push", "origin", f"refs/tags/{tag}:refs/tags/{tag}"], check=True)
+    """Push an immutable ref using checkout credentials, then record it locally.
+
+    Git receive-pack reports the server's rejection reason, unlike the generic
+    HTTP 422 returned by the Git References API. Never force an existing tag or
+    leave a local success marker when the remote rejected the update.
+    """
+    print(f"Creating refs/tags/{tag} at {commit}", flush=True)
+    subprocess.run(
+        ["git", "push", "--porcelain", "origin", f"{commit}:refs/tags/{tag}"],
+        check=True,
+    )
+    git("tag", tag, commit)
 
 
 def main(argv: list[str] | None = None) -> int:

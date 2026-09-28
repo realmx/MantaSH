@@ -215,7 +215,7 @@ class ReleaseVersionTests(unittest.TestCase):
                 self.assertEqual(release_version.main(["tag"]), 0)
             self.assertEqual(output.read_text(), "version=1.0.11\ncreated=true\n")
             self.assertTrue(all(args[0] != "commit" for args in calls))
-            self.assertEqual(push.call_args.args[0], ["git", "push", "origin", "refs/tags/v1.0.11:refs/tags/v1.0.11"])
+            self.assertEqual(push.call_args.args[0], ["git", "push", "--porcelain", "origin", f"{SHA}:refs/tags/v1.0.11"])
 
     def test_old_push_is_not_tagged_after_newer_source(self):
         with TemporaryDirectory() as directory:
@@ -256,7 +256,7 @@ class ReleaseVersionTests(unittest.TestCase):
             ) as push, patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}, clear=True):
                 self.assertEqual(release_version.main(["tag"]), 0)
             self.assertEqual(output.read_text(), "version=1.0.12\ncreated=true\n")
-            self.assertEqual(push.call_args.args[0][-1], "refs/tags/v1.0.12:refs/tags/v1.0.12")
+            self.assertEqual(push.call_args.args[0][-1], f"{SHA}:refs/tags/v1.0.12")
 
     def test_stage_versions_metadata_only_in_runner_copy(self):
         with TemporaryDirectory() as directory:
