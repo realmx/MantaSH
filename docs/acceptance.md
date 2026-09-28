@@ -12,7 +12,7 @@
 
 [开发与验证](development.md#必做检查)列出基础命令。CI 覆盖格式、核心测试/检查、文档和发布辅助脚本；真实 PTY、回环 SSH/SFTP、加密凭据、编码、SQLite、传输与隔离原生 QA 分别有专项入口。Actions 可生成 macOS DMG 和 Windows 安装器，但构建、代码签名校验和人工安装是不同证据。
 
-发布的 macOS 包是 ad-hoc 签名、未经 Apple 公证，Windows 安装器未代码签名。`v1.0.0` 的五目标 Release 与 Homebrew cask 更新已在 runner 完成；本机 arm64 的 `brew install`、版本、架构和签名已核对，但 Gatekeeper 返回拒绝，尚未将用户在系统中点击“仍要打开”后的启动记为通过。详见[发布文档](release.md)与[交付状态](delivery-status.md)。
+发布的 macOS 包是 ad-hoc 签名、未经 Apple 公证，Windows 安装器未代码签名。`v1.0.0`（源码 `ffe9d05`）的五目标 Release 与 Homebrew cask 更新已在 runner 完成；五个安装包及五个校验文件匿名下载均返回 HTTP 200，SHA-256 全部匹配。在 macOS 27.0 arm64 / Homebrew 7.0.6 上执行 `brew fetch --cask --force realmx/taps/mantash`、`brew reinstall --cask realmx/taps/mantash` 成功，应用安装到 `/Applications/MantaSH.app`，版本为 `1.0.0`、架构为 arm64、ad-hoc 签名有效，二进制与公开 DMG 逐字节一致；再次执行标准安装命令提示已是最新版。两个 DMG 均通过磁盘映像校验。本机 `spctl --assess` 返回拒绝，尚未将用户在系统中点击“仍要打开”后的启动记为通过。详见[发布文档](release.md)与[交付状态](delivery-status.md)。
 
 ## 尚未验收
 
