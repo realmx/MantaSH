@@ -294,6 +294,11 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "day" => ("白天", "Day"),
         "night" => ("黑夜", "Night"),
         "language" => ("语言", "Language"),
+        "local_shell" => (
+            "本地终端 Shell（新会话生效）",
+            "Local terminal shell (new sessions only)",
+        ),
+        "local_shell_unavailable" => ("未发现可用 Shell", "No available shell found"),
         "ui_font" => ("界面字体", "Interface font"),
         "terminal_font" => ("终端字体", "Terminal font"),
         "ui_size" => ("界面字号", "Interface size"),

@@ -1,7 +1,6 @@
 //! Selected paired workbench: native terminals with a contextual SSH tool page.
 use super::*;
 use dialogs::CloseTarget;
-#[cfg(not(target_os = "windows"))]
 use gpui_component::TitleBar;
 use gpui_component::{IconName, Sizable, input::Input};
 use std::rc::Rc;
@@ -2350,29 +2349,14 @@ impl Render for Workbench {
                         ),
                     ),
             );
-        let toolbar = {
-            #[cfg(target_os = "windows")]
-            {
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_shrink_0()
-                    .h(px(self.toolbar_height()))
-                    .bg(p.surface)
-                    .border_b_1()
-                    .border_color(p.border)
-                    .child(div().relative().flex_1().min_w_0().h_full().child(header))
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                TitleBar::new()
-                    .h(px(self.toolbar_height()))
-                    .bg(p.surface)
-                    .border_b_1()
-                    .border_color(p.border)
-                    .child(div().relative().flex_1().min_w_0().h_full().child(header))
-            }
-        };
+        // The transparent Windows title bar retains native HTMINBUTTON,
+        // HTMAXBUTTON and HTCLOSE routing without a second OS caption row.
+        let toolbar = TitleBar::new()
+            .h(px(self.toolbar_height()))
+            .bg(p.surface)
+            .border_b_1()
+            .border_color(p.border)
+            .child(div().relative().flex_1().min_w_0().h_full().child(header));
         let entity = cx.entity();
         let root = div()
             .id("mantash-workbench")
@@ -2679,7 +2663,7 @@ fn drag_resize_step(
                     (e.position.y - bounds.top()) / bounds.size.height
                 };
                 if let Some(tab) = this.tabs.iter_mut().find(|t| t.id == tab_id) {
-                    tab.layout.set_ratio(node_id, ratio);
+                    tab.layout.set_ratio(node_id, ratio.into());
                 }
             }
         }

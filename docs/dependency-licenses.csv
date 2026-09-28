@@ -367,7 +367,7 @@ lyon_path,1.0.19,MIT OR Apache-2.0,,https://github.com/nical/lyon,registry+https
 lyon_tessellation,1.0.22,MIT OR Apache-2.0,,https://github.com/nical/lyon,registry+https://github.com/rust-lang/crates.io-index
 mac,0.1.1,MIT/Apache-2.0,,https://github.com/reem/rust-mac.git,registry+https://github.com/rust-lang/crates.io-index
 malloc_buf,0.0.6,MIT,,https://github.com/SSheldon/malloc_buf,registry+https://github.com/rust-lang/crates.io-index
-mantash,1.0.0,GPL-3.0-or-later,,,MantaSH workspace
+mantash,1.1.0,GPL-3.0-or-later,,,MantaSH workspace
 markdown,1.0.0,MIT,,https://github.com/wooorm/markdown-rs,registry+https://github.com/rust-lang/crates.io-index
 markup5ever,0.12.1,MIT OR Apache-2.0,,https://github.com/servo/html5ever,registry+https://github.com/rust-lang/crates.io-index
 markup5ever_rcdom,0.3.0,MIT OR Apache-2.0,,https://github.com/servo/html5ever,registry+https://github.com/rust-lang/crates.io-index

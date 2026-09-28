@@ -9,7 +9,7 @@ brew install realmx/taps/mantash --cask
 brew upgrade --cask mantash
 ```
 
-源码基准版本为 `1.0.0`；发布版本以 tag 和 Release 页为准，设置弹窗 footer 左侧以“版本x.x.x”（例如“版本1.0.0”）显示当前运行版本。macOS 包采用 ad-hoc 签名、未经 Apple 公证；Windows 安装器未签名，可能触发 SmartScreen。Windows 的运行和安装体验尚未实机验收。
+源码基准版本为 `1.1.0`；发布版本以 tag 和 Release 页为准，设置弹窗 footer 左侧以“版本x.x.x”（例如“版本1.1.0”）显示当前运行版本。macOS 包采用 ad-hoc 签名、未经 Apple 公证；Windows 安装器未签名，可能触发 SmartScreen。Windows 的运行和安装体验尚未实机验收。
 
 ### macOS 无法直接打开
 
@@ -32,7 +32,9 @@ brew upgrade --cask mantash
 
 ## 本地终端
 
-macOS 使用系统 `$SHELL`；Windows 优先 PowerShell 7，然后是系统 PowerShell，最后回退 CMD，初始目录为用户主目录。Tab/Shift+Tab 交给终端程序或 Shell 补全；连接与设置表单中的 Tab 仍切换控件，输入法组合期间不提交补全键。Ctrl+C、Ctrl+D 保持 Shell 含义。
+macOS 使用系统 `$SHELL`；Windows 可在设置中选择已发现的本地 Shell（PowerShell 7、系统 PowerShell、CMD、Bash 等），选择仅对新建本地会话生效，已有会话继续使用原 Shell。初始目录为用户主目录。Tab/Shift+Tab 交给终端程序或 Shell 补全；连接与设置表单中的 Tab 仍切换控件，输入法组合期间不提交补全键。Ctrl+C、Ctrl+D 保持 Shell 含义。
+
+设置中点击“本地终端 Shell（新会话生效）”下一行的选择器可展开下拉菜单，点击目标 Shell 后保存；当前项显示勾选标记。点击选择器本身不会轮换 Shell，取消菜单不修改选择。
 
 拖动选择文本、双击选词；右键在已有选区时复制，否则粘贴。终端程序启用鼠标报告时点击交给程序，按 Shift 可使用本地选区或回滚。触控板慢速滚动会累计，不丢弃不足一行的位移；粘贴遵循程序请求的 bracketed-paste 模式。
 

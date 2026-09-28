@@ -350,9 +350,11 @@ pub struct Workbench {
     history_content_marker: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     window_restore: Option<crate::window_layout::Rect>,
     window_change: Option<Id>,
+    local_shells: Option<Vec<String>>,
+    local_shells_loading: bool,
+    root_focus: FocusHandle,
     notice: Option<String>,
     storage_warning: Option<String>,
-    root_focus: FocusHandle,
     subscriptions: Vec<Subscription>,
     resize: Option<Resize>,
     resize_last_x: Option<f32>,
@@ -366,7 +368,6 @@ pub struct Workbench {
     allow_close: bool,
     qa: Option<qa::Controller>,
 }
-
 impl Workbench {
     /// Restore independent local processes and dormant SSH panes in the saved order.
     pub fn new(
@@ -448,9 +449,11 @@ impl Workbench {
             history_content_marker: Rc::new(std::cell::Cell::new(None)),
             window_restore: None,
             window_change: None,
+            local_shells: None,
+            local_shells_loading: false,
+            root_focus: cx.focus_handle(),
             notice: titlebar_error,
             storage_warning: warning,
-            root_focus: cx.focus_handle(),
             subscriptions: vec![],
             resize: None,
             resize_last_x: None,
@@ -994,10 +997,8 @@ impl Workbench {
         terminal
     }
     pub(super) fn local_spec(&self) -> SessionSpec {
-        // Local sessions always run the platform-default shell in the user's
-        // home directory; the settings dialog no longer offers overrides.
         SessionSpec::Local {
-            shell: crate::platform::default_shell(),
+            shell: self.prefs.local_shell.clone(),
             directory: crate::platform::home_directory(),
             encoding: self.prefs.local_encoding,
         }

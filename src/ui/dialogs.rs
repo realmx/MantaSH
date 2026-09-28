@@ -12,6 +12,7 @@ use crate::{
 use gpui_component::{
     IconName,
     checkbox::Checkbox,
+    menu::PopupMenuItem,
     plot::shape::{Arc as ProgressArc, ArcData},
 };
 
@@ -1037,6 +1038,18 @@ impl Workbench {
         }
     }
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.local_shells = None;
+        self.local_shells_loading = true;
+        let task = self.backend.runtime.spawn_blocking(crate::platform::shells);
+        cx.spawn_in(window, async move |view, cx| {
+            let shells = task.await;
+            let _ = view.update_in(cx, |this, _window, cx| {
+                this.local_shells_loading = false;
+                this.local_shells = shells.ok();
+                cx.notify();
+            });
+        })
+        .detach();
         self.show_modal(Modal::Settings, window, cx);
     }
     /// Open the font picker through the same path used by the debug driver.
@@ -1810,6 +1823,62 @@ impl Workbench {
                             },
                         ),
                     ));
+                let shell_choices = self.local_shells.clone().unwrap_or_default();
+                let shell_picker = if self.local_shells_loading {
+                    div()
+                        .text_color(p.muted)
+                        .child(self.t("loading"))
+                        .into_any_element()
+                } else if shell_choices.is_empty() {
+                    div()
+                        .text_color(p.error)
+                        .child(self.t("local_shell_unavailable"))
+                        .into_any_element()
+                } else {
+                    let current = self.prefs.local_shell.clone();
+                    let label = current
+                        .rsplit(['/', '\\'])
+                        .next()
+                        .unwrap_or(&current)
+                        .to_string();
+                    let view = cx.entity().downgrade();
+                    self.button("local-shell-selector", label)
+                        .tooltip(current.clone())
+                        .dropdown_menu(move |mut menu, _, _| {
+                            for shell in &shell_choices {
+                                let selected = shell == &current;
+                                let shell = shell.clone();
+                                let view = view.clone();
+                                menu = menu.item(
+                                    PopupMenuItem::new(shell.clone())
+                                        .checked(selected)
+                                        .on_click(move |_, window, cx| {
+                                            let _ = view.update(cx, |this, cx| {
+                                                if matches!(this.modal, Some(Modal::Settings))
+                                                    && this.local_shells.as_ref().is_some_and(
+                                                        |choices| choices.contains(&shell),
+                                                    )
+                                                {
+                                                    this.prefs.local_shell = shell.clone();
+                                                    this.apply_preferences(window, cx);
+                                                }
+                                            });
+                                        }),
+                                );
+                            }
+                            menu
+                        })
+                        .into_any_element()
+                };
+                body = body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap(px(theme::SPACE_SMALL))
+                        .child(self.t("local_shell"))
+                        .child(shell_picker),
+                );
                 for terminal in [false, true] {
                     let family = if terminal {
                         &self.prefs.terminal_font

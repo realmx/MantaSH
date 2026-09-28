@@ -28,9 +28,9 @@ class ReleaseMatrixTests(unittest.TestCase):
     def test_tag_push_and_manual_tag_publish_all_targets(self):
         for event, platform in (("push", "all"), ("workflow_dispatch", "windows-x64")):
             with self.subTest(event=event):
-                result = release_matrix.select("tag", "v1.0.11", event, platform, SHA, "1.0.10")
-                self.assertEqual(result["version"], "1.0.11")
-                self.assertEqual(result["package_version"], "1.0.11")
+                result = release_matrix.select("tag", "v1.1.1", event, platform, SHA, "1.1.0")
+                self.assertEqual(result["version"], "1.1.1")
+                self.assertEqual(result["package_version"], "1.1.1")
                 self.assertEqual(result["publish"], "true")
                 names = [row["name"] for row in json.loads(result["matrix"])["include"]]
                 self.assertEqual(names, ["windows-x64", "windows-x86", "windows-arm64", "macos-arm64", "macos-x64"])
@@ -54,7 +54,7 @@ class ReleaseMatrixTests(unittest.TestCase):
         for ref_type, ref_name, event in (
             ("branch", "master", "push"),
             ("tag", "v1.0.9", "push"),
-            ("tag", "trial-v1.0.11", "push"),
+            ("tag", "trial-v1.1.1", "push"),
             ("branch", "build/", "pull_request"),
         ):
             with self.subTest(ref=ref_name), self.assertRaises(ValueError):
@@ -143,10 +143,10 @@ class ReleaseVersionTests(unittest.TestCase):
                 if args[:2] == ("tag", "--points-at"):
                     return ""
                 if args == ("tag", "--merged", "origin/master"):
-                    return "v1.0.10"
+                    return "v1.1.0"
                 if args == ("tag", "--list"):
-                    return "v1.0.10"
-                if args == ("tag", "v1.0.11", SHA):
+                    return "v1.1.0"
+                if args == ("tag", "v1.1.1", SHA):
                     return ""
                 raise AssertionError(args)
             with patch.object(release_version, "git", side_effect=git), patch.object(
@@ -159,16 +159,16 @@ class ReleaseVersionTests(unittest.TestCase):
                               ["README.md", "docs/release.md"]):
                     changed.return_value = files
                     self.assertEqual(release_version.main(["tag"]), 0)
-                    self.assertNotIn(("tag", "v1.0.11", SHA), calls)
+                    self.assertNotIn(("tag", "v1.1.1", SHA), calls)
                 self.assertEqual(runner.call_count, 2)
                 changed.return_value = ["README.md", "src/ui/mod.rs"]
                 self.assertEqual(release_version.main(["tag"]), 0)
             self.assertEqual(changed.call_count, 3)
-            changed.assert_called_with("v1.0.10", SHA, ROOT)
-            self.assertIn(("tag", "v1.0.11", SHA), calls)
+            changed.assert_called_with("v1.1.0", SHA, ROOT)
+            self.assertIn(("tag", "v1.1.1", SHA), calls)
             self.assertEqual(runner.call_count, 4)
             self.assertEqual(output.read_text(),
-                             "version=1.0.10\ncreated=false\n" * 2 + "version=1.0.11\ncreated=true\n")
+                             "version=1.1.0\ncreated=false\n" * 2 + "version=1.1.1\ncreated=true\n")
 
     def test_empty_tree_diff_does_not_create_a_tag(self):
         with patch.object(release_version, "changed_paths_since", return_value=[]):
@@ -181,13 +181,13 @@ class ReleaseVersionTests(unittest.TestCase):
                 if args == ("rev-parse", "HEAD"):
                     return SHA
                 if args[:2] == ("tag", "--points-at"):
-                    return "v1.0.11"
+                    return "v1.1.1"
                 raise AssertionError(args)
             with patch.object(release_version, "git", side_effect=git), patch.object(
                 release_version.subprocess, "run"
             ) as push, patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}, clear=True):
                 self.assertEqual(release_version.main(["tag"]), 0)
-            self.assertEqual(output.read_text(), "version=1.0.11\ncreated=false\n")
+            self.assertEqual(output.read_text(), "version=1.1.1\ncreated=false\n")
             push.assert_not_called()
 
     def test_new_push_tags_source_without_version_commit(self):
@@ -201,10 +201,10 @@ class ReleaseVersionTests(unittest.TestCase):
                 if args[:2] == ("tag", "--points-at"):
                     return ""
                 if args == ("tag", "--merged", "origin/master"):
-                    return "v1.0.7\nv1.0.10"
+                    return "v1.0.7\nv1.1.0"
                 if args == ("tag", "--list"):
-                    return "v1.0.7\nv1.0.10"
-                if args == ("tag", "v1.0.11", SHA):
+                    return "v1.0.7\nv1.1.0"
+                if args == ("tag", "v1.1.1", SHA):
                     return ""
                 raise AssertionError(args)
             with patch.object(release_version, "git", side_effect=git), patch.object(
@@ -213,9 +213,9 @@ class ReleaseVersionTests(unittest.TestCase):
             ) as push, patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}, clear=True):
                 push.return_value.returncode = 0
                 self.assertEqual(release_version.main(["tag"]), 0)
-            self.assertEqual(output.read_text(), "version=1.0.11\ncreated=true\n")
+            self.assertEqual(output.read_text(), "version=1.1.1\ncreated=true\n")
             self.assertTrue(all(args[0] != "commit" for args in calls))
-            self.assertEqual(push.call_args.args[0], ["git", "push", "--porcelain", "origin", f"{SHA}:refs/tags/v1.0.11"])
+            self.assertEqual(push.call_args.args[0], ["git", "push", "--porcelain", "origin", f"{SHA}:refs/tags/v1.1.1"])
 
     def test_old_push_is_not_tagged_after_newer_source(self):
         with TemporaryDirectory() as directory:
@@ -226,14 +226,14 @@ class ReleaseVersionTests(unittest.TestCase):
                 if args[:2] == ("tag", "--points-at"):
                     return ""
                 if args == ("tag", "--merged", "origin/master"):
-                    return "v1.0.11"
+                    return "v1.1.1"
                 raise AssertionError(args)
             with patch.object(release_version, "git", side_effect=git), patch.object(
                 release_version.subprocess, "run"
             ) as runner, patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}, clear=True):
                 runner.return_value.returncode = 1
                 self.assertEqual(release_version.main(["tag"]), 0)
-            self.assertEqual(output.read_text(), "version=1.0.11\ncreated=false\n")
+            self.assertEqual(output.read_text(), "version=1.1.1\ncreated=false\n")
             self.assertEqual(runner.call_count, 1)
 
     def test_rewritten_master_keeps_version_above_unmerged_release_tag(self):
@@ -247,8 +247,8 @@ class ReleaseVersionTests(unittest.TestCase):
                 if args == ("tag", "--merged", "origin/master"):
                     return ""
                 if args == ("tag", "--list"):
-                    return "v1.0.11\ntrial-v9.0.0"
-                if args == ("tag", "v1.0.12", SHA):
+                    return "v1.1.1\ntrial-v9.0.0"
+                if args == ("tag", "v1.1.2", SHA):
                     return ""
                 raise AssertionError(args)
             with patch.object(release_version, "git", side_effect=git), patch.object(
@@ -257,8 +257,8 @@ class ReleaseVersionTests(unittest.TestCase):
                 return_value=subprocess.CompletedProcess(["git", "push"], 0, "", ""),
             ) as push, patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}, clear=True):
                 self.assertEqual(release_version.main(["tag"]), 0)
-            self.assertEqual(output.read_text(), "version=1.0.12\ncreated=true\n")
-            self.assertEqual(push.call_args.args[0][-1], f"{SHA}:refs/tags/v1.0.12")
+            self.assertEqual(output.read_text(), "version=1.1.2\ncreated=true\n")
+            self.assertEqual(push.call_args.args[0][-1], f"{SHA}:refs/tags/v1.1.2")
 
     def test_stage_versions_metadata_only_in_runner_copy(self):
         with TemporaryDirectory() as directory:

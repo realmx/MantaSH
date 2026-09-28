@@ -203,6 +203,7 @@ pub struct Preferences {
     pub ui_size: f32,
     pub terminal_font: String,
     pub terminal_size: f32,
+    pub local_shell: String,
     pub tool_preferred_width: Option<f32>,
     pub files_preferred_height: Option<f32>,
     pub tool: Option<Tool>,
@@ -223,6 +224,7 @@ impl Default for Preferences {
             ui_size: 14.,
             terminal_font: crate::platform::terminal_font().into(),
             terminal_size: 12.,
+            local_shell: crate::platform::default_shell(),
             tool_preferred_width: None,
             files_preferred_height: None,
             tool: None,
@@ -247,6 +249,9 @@ impl Preferences {
         }
         self.ui_size = bounded(self.ui_size, 14., 12., 18.);
         self.terminal_size = bounded(self.terminal_size, 12., 12., 18.);
+        if self.local_shell.trim().is_empty() {
+            self.local_shell = crate::platform::default_shell();
+        }
         if self
             .tool_preferred_width
             .is_some_and(|v| !v.is_finite() || v < 0.)

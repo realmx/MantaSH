@@ -4,6 +4,7 @@ use gpui::*;
 use gpui_component::{
     Disableable, Icon, IconName, Selectable, Sizable,
     button::{Button as NativeButton, ButtonCustomVariant, ButtonVariants},
+    menu::{DropdownMenu, PopupMenu},
 };
 use std::rc::Rc;
 
@@ -35,6 +36,7 @@ pub(super) struct Button {
     selected: bool,
     disabled: bool,
     menu: bool,
+    dropdown: Option<Box<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>>,
     /// Light-weight rendering without the focusable native button chrome.
     chromeless: bool,
     tooltip: Option<SharedString>,
@@ -70,12 +72,21 @@ impl Button {
             selected: false,
             disabled: false,
             menu: false,
+            dropdown: None,
             chromeless: false,
             tooltip: None,
             click: None,
             font_size,
             palette,
         }
+    }
+    /// Open a compact left-click dropdown without forcing full-width menu layout.
+    pub fn dropdown_menu(
+        mut self,
+        builder: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    ) -> Self {
+        self.dropdown = Some(Box::new(builder));
+        self
     }
     /// Render without the focusable native button: same cursor, hover, tooltip and
     /// click semantics at a fraction of the cost, for dense lists.
@@ -279,57 +290,74 @@ impl RenderOnce for Button {
         div()
             .relative()
             .child(
-                base.selected(self.selected).disabled(self.disabled).child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .when(self.menu, |d| d.w_full().justify_start())
-                        .min_w_0()
-                        .gap(px(8.))
-                        .text_size(px(self.font_size))
-                        .text_color(foreground)
-                        .when(matches!(self.tone, Tone::TabLabel | Tone::TabClose), |d| {
-                            d.group_hover("work-tab", |style| style.text_color(self.palette.text))
-                        })
-                        .when_some(self.icon_element, |d, element| d.child(element))
-                        .when(!has_icon_element, |d| {
-                            d.when_some(self.icon, |d, icon| {
-                                // Icons scale with the font but never exceed the button's
-                                // visual bounds: max 20px fits a 32px button comfortably.
-                                let icon_size = if matches!(self.tone, Tone::TabClose) {
-                                    self.font_size.min(16.)
-                                } else {
-                                    (self.font_size + 2.).min(20.)
-                                };
-                                let icon = Icon::new(icon).size(px(icon_size));
-                                d.child(match self.icon_color {
-                                    Some(color) => icon.text_color(color),
-                                    None => icon,
+                base.selected(self.selected)
+                    .disabled(self.disabled)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(self.menu, |d| d.w_full().justify_start())
+                            .min_w_0()
+                            .gap(px(8.))
+                            .text_size(px(self.font_size))
+                            .text_color(foreground)
+                            .when(matches!(self.tone, Tone::TabLabel | Tone::TabClose), |d| {
+                                d.group_hover("work-tab", |style| {
+                                    style.text_color(self.palette.text)
                                 })
                             })
-                            .when_some(self.custom_icon, |d, path| {
-                                // The svg painter reads only its own style.text.color; ancestor
-                                // text colors never reach it, so mirror the upstream Icon element.
-                                d.child(
-                                    gpui::svg()
-                                        .path(path)
-                                        .flex_none()
-                                        .size(px((self.font_size + 2.).min(20.)))
-                                        .text_color(self.icon_color.unwrap_or(foreground)),
+                            .when_some(self.icon_element, |d, element| d.child(element))
+                            .when(!has_icon_element, |d| {
+                                d.when_some(self.icon, |d, icon| {
+                                    // Icons scale with the font but never exceed the button's
+                                    // visual bounds: max 20px fits a 32px button comfortably.
+                                    let icon_size = if matches!(self.tone, Tone::TabClose) {
+                                        self.font_size.min(16.)
+                                    } else {
+                                        (self.font_size + 2.).min(20.)
+                                    };
+                                    let icon = Icon::new(icon).size(px(icon_size));
+                                    d.child(match self.icon_color {
+                                        Some(color) => icon.text_color(color),
+                                        None => icon,
+                                    })
+                                })
+                                .when_some(
+                                    self.custom_icon,
+                                    |d, path| {
+                                        // The svg painter reads only its own style.text.color; ancestor
+                                        // text colors never reach it, so mirror the upstream Icon element.
+                                        d.child(
+                                            gpui::svg()
+                                                .path(path)
+                                                .flex_none()
+                                                .size(px((self.font_size + 2.).min(20.)))
+                                                .text_color(self.icon_color.unwrap_or(foreground)),
+                                        )
+                                    },
                                 )
                             })
-                        })
-                        .when(!self.label.is_empty(), |d| {
-                            d.child(
-                                div()
-                                    .min_w_0()
-                                    .when(self.menu, |d| d.whitespace_normal())
-                                    .when(!self.menu, |d| d.overflow_hidden())
-                                    .child(self.label),
-                            )
-                        }),
-                ),
+                            .when(!self.label.is_empty(), |d| {
+                                d.child(
+                                    div()
+                                        .min_w_0()
+                                        .when(self.menu, |d| d.whitespace_normal())
+                                        .when(!self.menu, |d| d.overflow_hidden())
+                                        .child(self.label),
+                                )
+                            }),
+                    )
+                    .map(|button| {
+                        if let Some(builder) = self.dropdown {
+                            button
+                                .dropdown_caret(true)
+                                .dropdown_menu(builder)
+                                .into_any_element()
+                        } else {
+                            button.into_any_element()
+                        }
+                    }),
             )
             .child(
                 div()

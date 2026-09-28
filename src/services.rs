@@ -250,7 +250,7 @@ impl Backend {
             bail!("Expected local session");
         };
         let executable = crate::platform::find_executable(shell)
-            .unwrap_or_else(|| crate::platform::default_shell().into());
+            .ok_or_else(|| anyhow::anyhow!("Configured local shell is unavailable: {shell}"))?;
         let persistent_hook_directory = self.data_directory.join("shell-integration");
         let (hook_directory, _temporary_hook_directory) =
             if crate::integration::write_local(&persistent_hook_directory).is_ok() {
