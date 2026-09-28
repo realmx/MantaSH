@@ -18,6 +18,8 @@ rustup show active-toolchain
 
 桌面入口在 Windows 的 debug/release 构建中均使用 GUI 子系统，从资源管理器或开始菜单启动时不创建额外控制台窗口；应用内本地 Shell 仍通过 ConPTY 运行。打包脚本检查 EXE 的 PE 子系统字段，拒绝将控制台子系统程序打入安装器。
 
+`build.rs` 将 `assets/mantash.ico` 以资源 ID `1` 嵌入 Windows 桌面 EXE，供 GPUI 窗口、任务栏、文件图标、快捷方式和卸载项使用；安装器使用同一 ICO。Windows runner 在打包前检查实际 EXE 中的图标资源，缺失时停止打包。已有快捷方式的显示仍需按下表实机验收。
+
 ## 隔离运行
 
 ```powershell
@@ -32,6 +34,7 @@ cargo run --locked
 | 范围 | 操作与预期 |
 |---|---|
 | 启动 | 从资源管理器和开始菜单启动，仅出现 MantaSH 窗口，不弹出额外命令窗口；应用内本地终端仍可输入和执行命令 |
+| 应用图标 | 程序 EXE、开始菜单/桌面快捷方式、运行窗口、任务栏和卸载项均显示 MantaSH 图标 |
 | 本地 Shell / ConPTY | PowerShell 7、系统 PowerShell、CMD 回退；中文输入、粘贴、Ctrl+C、颜色、滚动、Vim/less |
 | 字体与 DPI | 默认 14px/12px，100%、125%、150%、200% 缩放及字号放大无截断 |
 | SSH 与凭据 | 密码、首次/变化指纹、取消、断线/重连、认证后记忆与重启复用 |

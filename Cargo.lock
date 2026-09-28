@@ -3932,6 +3932,7 @@ dependencies = [
  "cocoa 0.26.0",
  "csv",
  "directories",
+ "embed-resource",
  "encoding_rs",
  "getrandom 0.2.17",
  "gpui",

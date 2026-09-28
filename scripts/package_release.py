@@ -140,9 +140,35 @@ def validate_windows_gui(binary: Path) -> None:
             raise ValueError(f"MantaSH must use Windows GUI subsystem 2, got {subsystem}: {binary}")
 
 
+def validate_windows_icon(binary: Path) -> None:
+    """On the Windows runner, verify the exact icon resource GPUI loads from the EXE."""
+    if os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.LoadLibraryExW.argtypes = [wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD]
+    kernel32.LoadLibraryExW.restype = wintypes.HMODULE
+    kernel32.FindResourceW.argtypes = [wintypes.HMODULE, ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.FindResourceW.restype = ctypes.c_void_p
+    kernel32.FreeLibrary.argtypes = [wintypes.HMODULE]
+    kernel32.FreeLibrary.restype = wintypes.BOOL
+    # Map resources only: never execute the binary while validating the package.
+    module = kernel32.LoadLibraryExW(str(binary.resolve()), None, 0x02 | 0x20)
+    if not module:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not kernel32.FindResourceW(module, 1, 14):  # ID 1, RT_GROUP_ICON
+            raise ValueError(f"MantaSH executable is missing application icon resource 1: {binary}")
+    finally:
+        kernel32.FreeLibrary(module)
+
+
 def windows_tree(stage: Path, binary: Path, version: str, target: str) -> Path:
     """Prepare the executable and notices for the Windows installer."""
     validate_windows_gui(binary)
+    validate_windows_icon(binary)
     root = stage / "MantaSH"
     executable = root / "mantash.exe"
     copy_file(binary, executable)

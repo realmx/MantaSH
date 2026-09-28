@@ -14,7 +14,7 @@ default-run = "mantash"
 
 [features]
 default = ["desktop"]
-desktop = ["dep:gpui", "dep:gpui-component", "dep:gpui-component-assets", "dep:rfd", "dep:raw-window-handle", "dep:rust-embed", "dep:cocoa", "dep:objc", "dep:windows-sys"]
+desktop = ["dep:gpui", "dep:gpui-component", "dep:gpui-component-assets", "dep:rfd", "dep:raw-window-handle", "dep:rust-embed", "dep:cocoa", "dep:objc", "dep:windows-sys", "dep:embed-resource"]
 
 [dependencies]
 anyhow = "1"
@@ -56,6 +56,9 @@ objc = { version = "=0.2.7", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "=0.61.2", optional = true, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+embed-resource = { version = "=3.0.11", optional = true }
 
 [dev-dependencies]
 rand = "0.10"

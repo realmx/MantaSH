@@ -377,6 +377,27 @@ class ReleasePackageTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     package_release.validate_windows_gui(binary)
 
+    def test_windows_icon_resource_is_required_and_module_is_released(self):
+        for resource in (0, 456):
+            with self.subTest(resource=resource), TemporaryDirectory() as directory:
+                root = Path(directory)
+                binary = root / "mantash.exe"
+                binary.write_bytes(self.windows_binary())
+                with patch.object(package_release, "os", SimpleNamespace(name="nt")), patch(
+                    "ctypes.WinDLL", create=True
+                ) as dll:
+                    kernel = dll.return_value
+                    kernel.LoadLibraryExW.return_value = 123
+                    kernel.FindResourceW.return_value = resource
+                    if resource:
+                        package_release.validate_windows_icon(binary)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "missing application icon resource 1"):
+                            package_release.windows_tree(root / "stage", binary, "1.2.3", "x86_64-pc-windows-msvc")
+                        self.assertFalse((root / "stage").exists())
+                    kernel.FindResourceW.assert_called_once_with(123, 1, 14)
+                    kernel.FreeLibrary.assert_called_once_with(123)
+
     def test_windows_installer_contains_staged_binary_and_has_checksum(self):
         for target, name, arch in (("i686-pc-windows-msvc", "x86", "x86compatible"),
                                    ("x86_64-pc-windows-msvc", "x64", "x64compatible"),
@@ -400,7 +421,9 @@ class ReleasePackageTests(unittest.TestCase):
                         "--version", "1.2.3", "--output-dir", str(root / "dist")]
                 with patch.object(package_release, "sys", SimpleNamespace(platform="win32")), patch.object(
                     sys, "argv", argv
-                ), patch.object(package_release.subprocess, "run", side_effect=compile_installer), redirect_stdout(StringIO()):
+                ), patch.object(package_release.subprocess, "run", side_effect=compile_installer), patch.object(
+                    package_release, "validate_windows_icon"
+                ), redirect_stdout(StringIO()):
                     self.assertEqual(package_release.main(), 0)
                 self.assertIn(f"/DBuildArch={arch}", calls[0])
                 installer = root / "dist" / f"MantaSH-1.2.3-windows-{name}-setup.exe"
