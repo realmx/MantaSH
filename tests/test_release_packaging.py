@@ -252,7 +252,9 @@ class ReleaseVersionTests(unittest.TestCase):
                     return ""
                 raise AssertionError(args)
             with patch.object(release_version, "git", side_effect=git), patch.object(
-                release_version.subprocess, "run"
+                release_version.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(["git", "push"], 0, "", ""),
             ) as push, patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}, clear=True):
                 self.assertEqual(release_version.main(["tag"]), 0)
             self.assertEqual(output.read_text(), "version=1.0.12\ncreated=true\n")

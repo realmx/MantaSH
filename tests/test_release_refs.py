@@ -1,6 +1,6 @@
 """Release refs use Git transport and never overwrite an existing remote tag."""
-import os
 from pathlib import Path
+import os
 import subprocess
 import sys
 import tempfile
@@ -16,22 +16,51 @@ class ReleaseRefTests(unittest.TestCase):
         with patch.object(release_version.subprocess, "run") as request, patch.object(
             release_version, "git"
         ) as git:
+            request.return_value.returncode = 0
+            request.return_value.stdout = ""
+            request.return_value.stderr = ""
             release_version.create_tag("v1.0.1", "a" * 40)
         request.assert_called_once_with(
             ["git", "push", "--porcelain", "origin", f'{"a" * 40}:refs/tags/v1.0.1'],
-            check=True,
+            check=False,
+            capture_output=True,
+            text=True,
         )
         git.assert_called_once_with("tag", "v1.0.1", "a" * 40)
 
     def test_rejected_push_does_not_record_local_success_or_retry(self):
-        with patch.object(
-            release_version.subprocess, "run",
-            side_effect=subprocess.CalledProcessError(1, ["git", "push"]),
-        ) as request, patch.object(release_version, "git") as git:
+        result = subprocess.CompletedProcess(
+            ["git", "push"], 1, "", "remote rejected"
+        )
+        with patch.object(release_version.subprocess, "run", return_value=result) as request, patch.object(
+            release_version, "git"
+        ) as git:
             with self.assertRaises(subprocess.CalledProcessError):
                 release_version.create_tag("v1.0.1", "a" * 40)
         request.assert_called_once()
         git.assert_not_called()
+
+    def test_reserved_tag_advances_to_next_patch_version(self):
+        calls = []
+        blocked = subprocess.CompletedProcess(
+            ["git", "push"], 1, "", "GH013: Cannot create ref due to creations being restricted"
+        )
+        accepted = subprocess.CompletedProcess(["git", "push"], 0, "", "")
+
+        def run(command, **kwargs):
+            calls.append(command)
+            return blocked if command[-1].endswith("v1.0.1") else accepted
+
+        with patch.object(release_version.subprocess, "run", side_effect=run), patch.object(
+            release_version, "git", return_value=""
+        ) as git:
+            self.assertEqual(
+                release_version.create_next_tag("1.0.0", "a" * 40, ["v1.0.0"]),
+                "1.0.2",
+            )
+        self.assertEqual(calls[0][-1], "a" * 40 + ":refs/tags/v1.0.1")
+        self.assertEqual(calls[1][-1], "a" * 40 + ":refs/tags/v1.0.2")
+        git.assert_called_once_with("tag", "v1.0.2", "a" * 40)
 
     def test_real_remote_tag_is_created_at_source_and_cannot_be_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -59,7 +88,6 @@ class ReleaseRefTests(unittest.TestCase):
                 release_version.create_tag("v1.0.1", first)
                 self.assertEqual(git("rev-parse", "refs/tags/v1.0.1"), first)
                 self.assertEqual(git("ls-remote", "origin", "refs/tags/v1.0.1").split()[0], first)
-                # A stale checkout that has not fetched the tag still cannot replace it.
                 git("tag", "-d", "v1.0.1")
                 with self.assertRaises(subprocess.CalledProcessError):
                     release_version.create_tag("v1.0.1", second)

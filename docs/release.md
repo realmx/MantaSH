@@ -19,7 +19,7 @@ Release runner 在编译前仅在本次检出的源码中把 `Cargo.toml`、`Car
 
 `GITHUB_TOKEN` 创建的 tag 不依赖 tag push 再触发 workflow，因此版本流程显式派发。已有 tag 或过期的旧 push 不重复分配版本。tag 在发包前创建；构建失败会留下 tag，修复后可重跑同一 tag。开发构建以 `<源码基准>-dev.<短SHA>` 命名，作为 Actions artifacts 保留 14 天；`build/windows-x64`、`build/macos-arm64` 各只构建对应目标，其余 `build/**` 构建全部目标。
 
-Actions 使用 checkout 配置的任务自身 `GITHUB_TOKEN`，通过非强制 Git push 创建指向当前源码提交的 tag，远端接受后才记录本地 tag 并显式派发 Release。推送前记录版本和目标 SHA；Git 服务端拒绝时保留具体错误并使任务失败，不切换凭据、不覆盖已有 tag，也不绕过 ref 保护。创建 tag 失败会阻断自动增版和发包，不能将失败任务视为纯文档跳过。
+Actions 使用 checkout 配置的任务自身 `GITHUB_TOKEN`，通过非强制 Git push 创建指向当前源码提交的 tag，远端接受后才记录本地 tag 并显式派发 Release。推送前记录版本和目标 SHA；Git 服务端拒绝时保留具体错误并使任务失败，不切换凭据、不覆盖已有 tag，也不绕过 ref 保护。若 GitHub 明确返回某个 tag 名因仓库创建规则被保留，版本脚本只跳过该候选补丁版本并尝试下一个；权限、网络或其它拒绝仍直接失败。
 
 合并或直接提交经审核的更新后，推送 `master` 会运行版本判定；包含发布相关变更时才创建下一个公开版本。推送前确认变更和基准版本：
 

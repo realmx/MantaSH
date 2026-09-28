@@ -113,19 +113,50 @@ def stage(root: Path, version: str) -> None:
             stream.write(text)
 
 
-def create_tag(tag: str, commit: str) -> None:
-    """Push an immutable ref using checkout credentials, then record it locally.
+class TagCreationBlocked(RuntimeError):
+    """The requested tag name is reserved by a repository-side creation rule."""
 
-    Git receive-pack reports the server's rejection reason, unlike the generic
-    HTTP 422 returned by the Git References API. Never force an existing tag or
-    leave a local success marker when the remote rejected the update.
-    """
+
+def bump_patch(version: str) -> str:
+    major, minor, patch = parts(version)
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def create_tag(tag: str, commit: str) -> None:
+    """Push an immutable ref, preserving the server rejection reason."""
     print(f"Creating refs/tags/{tag} at {commit}", flush=True)
-    subprocess.run(
+    result = subprocess.run(
         ["git", "push", "--porcelain", "origin", f"{commit}:refs/tags/{tag}"],
-        check=True,
+        check=False,
+        capture_output=True,
+        text=True,
     )
+    output = (result.stdout or "") + (result.stderr or "")
+    if result.returncode:
+        print(output, end="", file=sys.stderr, flush=True)
+        if "Cannot create ref due to creations being restricted" in output:
+            raise TagCreationBlocked(tag)
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, output=result.stdout, stderr=result.stderr
+        )
     git("tag", tag, commit)
+
+
+def create_next_tag(base: str, commit: str, tags: list[str]) -> str:
+    """Create the first usable patch tag when GitHub reserves a candidate name."""
+    version = next_version(base, tags)
+    for _ in range(100):
+        tag = "v" + version
+        if tag in tags:
+            version = bump_patch(version)
+            continue
+        try:
+            create_tag(tag, commit)
+            return version
+        except TagCreationBlocked:
+            print(f"Skipping reserved release tag {tag}; trying the next patch version")
+            version = bump_patch(version)
+    raise ValueError("Could not find an available release tag in the next 100 patch versions")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -156,9 +187,9 @@ def main(argv: list[str] | None = None) -> int:
                     version, created = latest[1:], False
                     print(f"Skipping documentation-only or unchanged update {commit} since {latest}")
                 else:
-                    version = next_version(source_version(args.root), git("tag", "--list").splitlines())
-                    tag = "v" + version
-                    create_tag(tag, commit)
+                    version = create_next_tag(
+                        source_version(args.root), commit, git("tag", "--list").splitlines()
+                    )
                     created = True
             print(f"Release version v{version} for {commit}: {'tag created' if created else 'no new tag'}")
             if output := os.environ.get("GITHUB_OUTPUT"):
