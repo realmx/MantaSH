@@ -91,6 +91,19 @@ if [[ "$(type -t nano)" == file ]]; then function nano {
   fi
 }; fi
 "#;
+/// Local Windows Bash only: remove Git for Windows' default leading blank row.
+/// Keep the OSC title and the two-line prompt; custom Git prompt files take precedence.
+pub const GIT_BASH_PROMPT: &str = r#"
+if [[ "$OSTYPE" == msys* && ! -f "$HOME/.config/git/git-prompt.sh" ]]; then
+  _mantash_git_title='\[\033]0;$TITLEPREFIX:$PWD\007\]'
+  _mantash_git_prefix="${_mantash_git_title}"'\n\[\033[32m\]\u@\h '
+  if [[ "$PS1" == "$_mantash_git_prefix"* ]]; then
+    PS1="${_mantash_git_title}"'\[\033[32m\]\u@\h '"${PS1#"$_mantash_git_prefix"}"
+  fi
+  unset _mantash_git_title _mantash_git_prefix
+fi
+"#;
+
 pub const POWERSHELL_RC: &str = r#"if (Get-Module -ListAvailable PSReadLine) {
   Import-Module PSReadLine
   $mantashPreviousHandler = (Get-PSReadLineOption).AddToHistoryHandler
@@ -141,10 +154,15 @@ pub fn quote(value: &str) -> String {
 /// Write only MantaSH-owned hook files. Nonces are passed through the child environment.
 pub fn write_local(directory: &Path) -> Result<()> {
     std::fs::create_dir_all(directory)?;
+    let bash_rc = if cfg!(windows) {
+        format!("{BASH_RC}{GIT_BASH_PROMPT}")
+    } else {
+        BASH_RC.to_string()
+    };
     for (name, text) in [
         (".zshenv", ZSH_ENV),
         (".zshrc", ZSH_RC),
-        ("bash.rc", BASH_RC),
+        ("bash.rc", bash_rc.as_str()),
         ("powershell.ps1", POWERSHELL_RC),
     ] {
         std::fs::write(directory.join(name), text)?;

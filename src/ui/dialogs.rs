@@ -1899,7 +1899,9 @@ impl Workbench {
                         .tooltip(current.clone())
                         .dropdown_menu(move |mut menu, _, _| {
                             for shell in &shell_choices {
-                                let selected = shell == &current;
+                                // Windows accepts both separators, including paths saved by older versions.
+                                let selected =
+                                    std::path::Path::new(shell) == std::path::Path::new(&current);
                                 let shell = shell.clone();
                                 let view = view.clone();
                                 menu = menu.item(

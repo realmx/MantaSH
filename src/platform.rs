@@ -41,11 +41,28 @@ pub fn find_executable(name: &str) -> Option<PathBuf> {
 fn git_bash() -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(program_files) = std::env::var_os("ProgramFiles") {
-        candidates.push(PathBuf::from(&program_files).join("Git/bin/bash.exe"));
-        candidates.push(PathBuf::from(program_files).join("Git/usr/bin/bash.exe"));
+        candidates.push(
+            PathBuf::from(&program_files)
+                .join("Git")
+                .join("bin")
+                .join("bash.exe"),
+        );
+        candidates.push(
+            PathBuf::from(program_files)
+                .join("Git")
+                .join("usr")
+                .join("bin")
+                .join("bash.exe"),
+        );
     }
     if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-        candidates.push(PathBuf::from(local_app_data).join("Programs/Git/bin/bash.exe"));
+        candidates.push(
+            PathBuf::from(local_app_data)
+                .join("Programs")
+                .join("Git")
+                .join("bin")
+                .join("bash.exe"),
+        );
     }
     candidates.into_iter().find(|path| path.is_file())
 }

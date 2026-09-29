@@ -18,6 +18,8 @@ rustup show active-toolchain
 
 桌面入口在 Windows 的 debug/release 构建中均使用 GUI 子系统，从资源管理器或开始菜单启动时不创建额外控制台窗口；应用内本地 Shell 仍通过 ConPTY 运行。打包脚本检查 EXE 的 PE 子系统字段，拒绝将控制台子系统程序打入安装器。
 
+设置中发现的 Git Bash 安装路径按 Windows 原生目录分隔符显示，例如 `C:\Program Files\Git\bin\bash.exe`；旧版本保存的混合分隔符路径仍可启动并匹配当前选项。本地 Git Bash 使用默认提示符时，移除标题控制序列后的起始空行，保留用户名、颜色、目录、Git 分支和 `$` 前的换行。自定义 Git 提示符文件及不匹配默认前缀的提示符保持原样；不修改用户配置文件，也不影响 SSH 或其他 Shell。相关脚本回归可在 macOS 上运行，Windows ConPTY 与原生窗口间距仍需实机验收。
+
 `build.rs` 将 `assets/mantash.ico` 以资源 ID `1` 嵌入 Windows 桌面 EXE，供 GPUI 窗口、任务栏、文件图标、快捷方式和卸载项使用；安装器使用同一 ICO。Windows runner 在打包前检查实际 EXE 中的图标资源，缺失时停止打包。已有快捷方式的显示仍需按下表实机验收。
 
 ## 隔离运行

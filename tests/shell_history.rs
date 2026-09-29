@@ -117,3 +117,23 @@ fn prompt_reports_the_directory_after_cd_without_a_history_entry() {
         "{reports:?}"
     );
 }
+
+#[test]
+fn git_bash_prompt_adjustment_preserves_history_and_directory_hooks() {
+    let rc = integration::BASH_RC.replacen(
+        "[[ -r \"$HOME/.bashrc\" ]] && source \"$HOME/.bashrc\"",
+        r#"HISTFILE=/dev/null
+history -c
+OSTYPE=msys
+PS1='\[\033]0;$TITLEPREFIX:$PWD\007\]\n\[\033[32m\]\u@\h \w\n$ '"#,
+        1,
+    );
+    let rc = format!("{rc}{}", integration::GIT_BASH_PROMPT);
+    let reports = bash_reports(&rc, b"echo git-bash-hook\rmkdir nested\rcd nested\rexit\r");
+    assert!(reports.iter().any(|r| r.command == "echo git-bash-hook"));
+    assert!(
+        reports
+            .iter()
+            .any(|r| r.command.is_empty() && r.directory.ends_with("/nested"))
+    );
+}
