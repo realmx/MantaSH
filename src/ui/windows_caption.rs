@@ -31,7 +31,9 @@ pub(super) fn post(window: &Window, command: CaptionCommand) -> anyhow::Result<(
             Input::KeyboardAndMouse::ReleaseCapture,
             WindowsAndMessaging::{IsZoomed, PostMessageW, WM_SYSCOMMAND},
         };
-        let RawWindowHandle::Win32(handle) = window.window_handle()?.as_raw() else {
+        let raw = HasWindowHandle::window_handle(window)
+            .map_err(|error| anyhow::anyhow!("Native window handle unavailable: {error:?}"))?;
+        let RawWindowHandle::Win32(handle) = raw.as_raw() else {
             anyhow::bail!("Not a Windows window");
         };
         let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
