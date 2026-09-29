@@ -98,6 +98,7 @@ actions!(
         SplitDown,
         OpenSettings,
         OpenAbout,
+        ShowAboutModal,
         OpenWindowControls,
         MinimizeWindow,
         FullscreenWindow,
@@ -113,32 +114,15 @@ actions!(
         ModalPrevious
     ]
 );
-/// Route the application menu's About command independently of the focused workbench control.
+/// Route the application menu's About command to the client-drawn About modal.
 pub fn register_about(cx: &mut App) {
     cx.on_action(|_: &OpenAbout, cx| {
-        #[cfg(target_os = "macos")]
-        cx.defer(|_| {
-            if let Err(error) = window_native::show_about() {
-                eprintln!("Could not open system About panel: {error}");
-            }
+        let Some(handle) = cx.active_window().or_else(|| cx.windows().first().copied()) else {
+            return;
+        };
+        let _ = handle.update(cx, |_, window, cx| {
+            window.dispatch_action(Box::new(ShowAboutModal), cx);
         });
-        #[cfg(target_os = "windows")]
-        if let Some(handle) = cx.active_window().or_else(|| cx.windows().first().copied()) {
-            cx.defer(move |cx| {
-                let prepared = handle.update(cx, |_, window, _| {
-                    window_native::prepare_about(window, crate::APP_VERSION)
-                });
-                match prepared {
-                    Ok(Ok(about)) => {
-                        if let Err(error) = about.show() {
-                            eprintln!("Could not open system About dialog: {error}");
-                        }
-                    }
-                    Ok(Err(error)) => eprintln!("Could not open system About dialog: {error}"),
-                    Err(error) => eprintln!("About window is unavailable: {error}"),
-                }
-            });
-        }
     });
 }
 

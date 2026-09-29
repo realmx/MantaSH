@@ -257,6 +257,12 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "system" => ("系统", "System"),
         "settings" => ("设置", "Settings"),
         "about_mantash" => ("关于 MantaSH", "About MantaSH"),
+        "about_author" => ("作者：Realm", "Author: Realm"),
+        "about_github" => (
+            "GitHub：github.com/realmx/MantaSH",
+            "GitHub: github.com/realmx/MantaSH",
+        ),
+        "open_github" => ("打开 GitHub", "Open GitHub"),
         "help" => ("使用文档", "Documentation"),
         "import" => ("导入", "Import"),
         "export" => ("导出", "Export"),

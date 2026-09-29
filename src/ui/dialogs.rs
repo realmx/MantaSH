@@ -88,6 +88,7 @@ pub(super) enum Modal {
         preview: ImportPreview,
         replace: bool,
     },
+    About,
     Trust {
         owner: Owner,
         host: String,
@@ -215,11 +216,12 @@ impl Modal {
             Modal::WindowControls(_) => "window_controls",
             Modal::DeleteProfiles { .. } => "delete_profiles",
             Modal::Import { .. } => "import",
+            Modal::About => "about",
             Modal::Trust { .. } => "trust",
             Modal::FileName { .. } => "file_name",
             Modal::DeleteFiles { .. } => "delete_files",
-            Modal::Close(_) => "close",
             Modal::Conflict { .. } => "conflict",
+            Modal::Close(_) => "close",
             Modal::Encoding { .. } => "encoding",
             Modal::Transfer { .. } => "transfer",
             Modal::Font { .. } => "font",
@@ -233,7 +235,6 @@ impl Modal {
         }
     }
 }
-
 pub(super) struct ModalFrame {
     pub(super) modal: Modal,
     pub(super) scroll: ScrollHandle,
@@ -1052,7 +1053,34 @@ impl Workbench {
         .detach();
         self.show_modal(Modal::Settings, window, cx);
     }
-    /// Open the font picker through the same path used by the debug driver.
+    pub(super) fn open_github(&mut self, cx: &mut Context<Self>) {
+        let task = self.backend.runtime.spawn_blocking(|| {
+            #[cfg(target_os = "macos")]
+            return std::process::Command::new("open")
+                .arg("https://github.com/realmx/MantaSH")
+                .status();
+            #[cfg(target_os = "windows")]
+            return std::process::Command::new("cmd")
+                .args(["/C", "start", "", "https://github.com/realmx/MantaSH"])
+                .status();
+            #[cfg(all(unix, not(target_os = "macos")))]
+            return std::process::Command::new("xdg-open")
+                .arg("https://github.com/realmx/MantaSH")
+                .status();
+        });
+        cx.spawn(async move |view, cx| {
+            let failed = task.await.map_or(true, |result| {
+                result.map_or(true, |status| !status.success())
+            });
+            if failed {
+                let _ = view.update(cx, |this, cx| {
+                    this.notice = Some("无法打开 GitHub 页面".into());
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
     pub(super) fn open_font_picker(
         &mut self,
         terminal: bool,
@@ -1557,7 +1585,8 @@ impl Workbench {
         // These dialogs act directly and always offer the header close button.
         let closable_dialog = matches!(
             modal,
-            Modal::Encoding { .. }
+            Modal::About
+                | Modal::Encoding { .. }
                 | Modal::Transfer { .. }
                 | Modal::LocalHistory
                 | Modal::SystemTools { .. }
@@ -1586,6 +1615,30 @@ impl Workbench {
         // Encoding pickers act directly on chips and do not need a footer strip.
         let mut footer_hidden = false;
         match modal {
+            Modal::About => {
+                title = self.t("about_mantash").into();
+                body = body
+                    .items_center()
+                    .child(
+                        gpui::svg()
+                            .path("mantash-mark.svg")
+                            .size(px(72.))
+                            .text_color(p.accent),
+                    )
+                    .child(div().text_size(px(18.)).child("MantaSH"))
+                    .child(div().text_color(p.muted).child(format!(
+                                "{} · {}",
+                                self.t("settings_version").replace("{version}", crate::APP_VERSION),
+                                self.t("about_author")
+                            )))
+                    .child(
+                        self.button("open-github", self.t("about_github"))
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_github(cx);
+                            })),
+                    );
+            }
             Modal::WindowControls(form) => {
                 title = self.t("window_controls").into();
                 body = body.child(self.render_window_controls(form, window, cx));

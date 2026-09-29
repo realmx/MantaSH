@@ -2387,7 +2387,23 @@ impl Render for Workbench {
                                 .on_click(cx.listener(|this, _, w, cx| this.open_settings(w, cx))),
                             cx,
                         ),
-                    ),
+                    )
+                    .when(cfg!(target_os = "windows"), |toolbar| {
+                        toolbar.child(
+                            self.header_control(
+                                "about",
+                                self.button("about", "")
+                                    .icon(IconName::Info)
+                                    .ghost()
+                                    .h(px(self.controls_height()))
+                                    .tooltip(self.t("about_mantash"))
+                                    .on_click(cx.listener(|this, _, w, cx| {
+                                        this.show_modal(Modal::About, w, cx);
+                                    })),
+                                cx,
+                            ),
+                        )
+                    }),
             );
         let toolbar = if cfg!(target_os = "windows") {
             div()
@@ -2473,6 +2489,9 @@ impl Render for Workbench {
                 if this.modal.is_none() {
                     this.open_settings(w, cx);
                 }
+            }))
+            .on_action(cx.listener(|this, _: &ShowAboutModal, w, cx| {
+                this.show_modal(Modal::About, w, cx);
             }))
             .on_action(cx.listener(|this, _: &SaveFile, _, cx| {
                 let editor = match &this.modal {
@@ -2851,7 +2870,7 @@ pub(super) fn menus(language: Language, cx: &mut App) {
         Menu {
             name: "MantaSH".into(),
             items: vec![
-                MenuItem::action(t("about_mantash"), OpenAbout),
+                MenuItem::action(t("about_mantash"), ShowAboutModal),
                 MenuItem::separator(),
                 MenuItem::action(t("settings"), OpenSettings),
                 MenuItem::separator(),
