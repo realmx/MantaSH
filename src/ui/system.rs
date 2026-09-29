@@ -219,13 +219,14 @@ impl Workbench {
                 result,
                 refreshing,
                 refresh_error: None,
-                raw_expanded: false,
-                command_expanded: false,
                 preview: false,
             },
             window,
             cx,
         );
+        // Refresh dynamic metrics immediately, even if the list's sample is stale.
+        // The accepted sample will revalidate identity before reading /proc details.
+        self.refresh_monitor(owner, cx);
     }
 
     /// A refresh keeps the prior detail text and only accepts the latest request.
@@ -1416,26 +1417,34 @@ impl Workbench {
         )
         .into_any_element()
     }
-    /// QA-only bounds for the visible process table; no production layout cost.
-    fn measure_process_region(&self, name: &'static str, _cx: &mut Context<Self>) -> AnyElement {
+    /// Measurement placeholders stay outside flex layout, with or without QA enabled.
+    pub(super) fn measure_process_region(
+        &self,
+        name: &'static str,
+        _cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let region = div().absolute().inset_0();
         #[cfg(debug_assertions)]
         if self.qa.is_some() {
             let view = _cx.entity();
-            return canvas(
-                move |bounds, _, cx| {
-                    view.update(cx, |this, _| {
-                        if let Some(qa) = &mut this.qa {
-                            qa.process_geometry.insert(name, bounds);
-                        }
-                    });
-                },
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .inset_0()
-            .into_any_element();
+            return region
+                .child(
+                    canvas(
+                        move |bounds, _, cx| {
+                            view.update(cx, |this, _| {
+                                if let Some(qa) = &mut this.qa {
+                                    qa.process_geometry.insert(name, bounds);
+                                }
+                            });
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .size_full(),
+                )
+                .into_any_element();
         }
-        div().size_0().into_any_element()
+        // Even an empty in-flow child would add a flex gap to the header and first row.
+        region.into_any_element()
     }
 
     /// Scan processes as aligned, sortable columns; only the result region scrolls.
@@ -1791,11 +1800,14 @@ impl Workbench {
                                                         .font_family(
                                                             self.prefs.terminal_font.clone(),
                                                         )
-                                                        .child(
-                                                            self.measure_process_region(
-                                                                "row_pid", cx,
-                                                            ),
-                                                        )
+                                                        .child(self.measure_process_region(
+                                                            if index == 0 {
+                                                                "first_row_pid"
+                                                            } else {
+                                                                "row_pid"
+                                                            },
+                                                            cx,
+                                                        ))
                                                         .child(process.pid.to_string()),
                                                 )
                                                 .child(
@@ -1813,11 +1825,14 @@ impl Workbench {
                                                         .overflow_hidden()
                                                         .text_ellipsis()
                                                         .whitespace_nowrap()
-                                                        .child(
-                                                            self.measure_process_region(
-                                                                "row_name", cx,
-                                                            ),
-                                                        )
+                                                        .child(self.measure_process_region(
+                                                            if index == 0 {
+                                                                "first_row_name"
+                                                            } else {
+                                                                "row_name"
+                                                            },
+                                                            cx,
+                                                        ))
                                                         .child(process.command.clone()),
                                                 )
                                                 .child(

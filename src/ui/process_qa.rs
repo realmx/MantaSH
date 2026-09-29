@@ -142,8 +142,6 @@ impl Workbench {
                 result,
                 refreshing: mode == "loading",
                 refresh_error: None,
-                raw_expanded: false,
-                command_expanded: false,
                 preview: true,
             },
             window,
@@ -357,8 +355,6 @@ impl Workbench {
                 result: Some(Ok(fixture_details(false))),
                 refreshing: false,
                 refresh_error: None,
-                raw_expanded: false,
-                command_expanded: false,
                 preview: true,
             },
             window,
@@ -447,8 +443,6 @@ impl Workbench {
             result,
             refreshing,
             refresh_error,
-            raw_expanded,
-            command_expanded,
             preview,
         }) = details
         else {
@@ -464,8 +458,7 @@ impl Workbench {
         });
         serde_json::json!({
             "owner": owner.session, "request": request, "pid": process.pid,
-            "preview": preview, "refreshing": refreshing, "raw_expanded": raw_expanded,
-            "command_expanded": command_expanded,
+            "preview": preview, "refreshing": refreshing,
             "long_command": result.as_ref().and_then(|r| r.as_ref().ok())
                 .is_some_and(|d| d.command.chars().count() > 160),
             "target_reason": self.process_target(*owner, process).err(),
@@ -479,6 +472,10 @@ impl Workbench {
             "metrics": self.process_target(*owner, process).ok().map(|p| serde_json::json!({
                 "user":p.user,"parent":p.parent,"state":p.state,"cpu":p.cpu,"rss":p.rss,
             })),
+            "geometry": self.qa.as_ref().map(|qa| qa.process_geometry.iter()
+                .filter(|(name, _)| name.starts_with("detail_"))
+                .map(|(name, bounds)| (*name, Self::qa_bounds(*bounds)))
+                .collect::<std::collections::HashMap<_, _>>()),
             "footer_bounds": self.qa.as_ref().and_then(|qa| qa.process_footer_bounds.map(Self::qa_bounds)),
             "confirm": match &self.modal { Some(Modal::ProcessConfirm { action, host, .. }) =>
                 Some(serde_json::json!({"host":host,"action":action})), _ => None },

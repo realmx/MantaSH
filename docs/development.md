@@ -60,10 +60,10 @@ QA：`scripts/qa_transfers_macos.py --directory <目录> --fixture <fixture 目�
 
 ## 系统工具：进程与端口
 
-进程列表（`Modal::SystemTools { page: Processes }`）、单进程详情（`Modal::ProcessDetails`）与端口列表（`page: Ports`）是三个独立弹窗，均读取所属 SSH Pane 的监控采样：连接成功后开始采样，可见期间每 3 秒刷新，无手动刷新按钮；筛选、排序、展开与滚动状态属于 Pane，重连/断线清理。
+进程列表（`Modal::SystemTools { page: Processes }`）、单进程详情（`Modal::ProcessDetails`）与端口列表（`page: Ports`）是三个独立弹窗，均读取所属 SSH Pane 的监控采样：连接成功后开始采样，可见期间每 3 秒刷新，列表无手动刷新按钮，进程详情标题栏保留刷新按钮；列表筛选、排序、展开与滚动状态属于 Pane，重连/断线清理。
 
 - `processes::current_process` 要求有效 Linux 进程段、原 boot ID、原 PID 和启动 ticks 完全一致；`process_target` 另核对连接、采样错误与 10 秒新鲜度。详情指标只读该返回值，禁止从已失效旧快照或同 PID 新实例补值；`process_action_reason` 与按钮禁用、提交前保护共用判定。
-- `Modal::ProcessDetails` 保存固定 Owner/进程身份、最新详情请求 UUID、旧读取结果与展开位；`apply_process_details_result` 只接受 Owner 与最新 UUID 匹配且仍在等待的回复（含确认页暂存的父弹窗），失败时保留上次成功命令。长命令限高预览的复制按钮始终复制完整原文，原始状态展开后独立限高滚动，不增加后端请求。`ProcessConfirm` 固定主机与动作，取消和确认提交后均恢复原详情；发送状态驻留 `process_attempts` 按请求 ID 接受异步结果。`Outcome::Sent` 不等于 Gone，后续有效采样才确认原实例退出，10 秒未确认显示 StillRunning，既不自动升级 SIGKILL 也不重试。
+- `Modal::ProcessDetails` 保存固定 Owner/进程身份、最新详情请求 UUID、旧读取结果；`apply_process_details_result` 只接受 Owner 与最新 UUID 匹配且仍在等待的回复（含确认页暂存的父弹窗），失败时保留上次成功命令。摘要使用双列同行标签和值，启动时间占整行；行/列/组间距分别为 8/16/12px，标签不收缩、值可换行。完整命令与补充状态直接平铺、随正文统一滚动，复制按钮始终复制完整命令。`Details::supplementary_status` 仅过滤摘要中已有的 State/Pid/PPid/VmRSS，不改变原始读取结果；刷新期间不插入加载提示。`ProcessConfirm` 固定主机与动作，取消和确认提交后均恢复原详情；发送状态驻留 `process_attempts` 按请求 ID 接受异步结果。`Outcome::Sent` 不等于 Gone，后续有效采样才确认原实例退出，10 秒未确认显示 StillRunning，既不自动升级 SIGKILL 也不重试。
 - 端口数据保持 `ss` 原始记录语义：`port_view.rs` 只做端点拆分、完整字段筛选、协议归类、数字排序与重复行 `PortKey`；未加方括号的 IPv6 不猜端口，UDP 状态按原样显示。`port_view::process_pids` 从 `ss -p` 提取去重 PID，展开区进程详情复用 `show_process_details`，仍经 Owner、身份、boot ID、PID 和启动 ticks 核验。复制前再次核对 Owner、当前弹窗和可见采样，不执行 SSH 写操作。
 - 列表几何与排版契约见[设计规范](design.md#系统工具)。QA：`qa_process_list_macos.py`（0/3/90 行、表头行对齐、筛选稳定高度）、`qa_process_details_macos.py`（过期回复、两种确认取消、身份失效、长命令与原始状态）、`qa_ports_macos.py`（0/3/5/48 行、表头行几何对齐、展开/搜索/排序/复制、错误与断线）均使用隔离样本，不把 QA 绘制当成正式入口真实鼠标验收。显式 QA `preview` 双重禁止信号，合成采样/命令不连接远端；真实信号路径由 `processes.rs` 测试与后台 SSH 请求覆盖。
 

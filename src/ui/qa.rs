@@ -235,8 +235,6 @@ pub enum Action {
         long: bool,
     },
     ProcessRefresh,
-    ProcessToggleRaw,
-    ProcessToggleCommand,
     ProcessAttemptFixture {
         phase: String,
     },
@@ -1363,28 +1361,6 @@ impl Workbench {
                 self.qa_process_reply(stale, error, long, cx)
             }
             Action::ProcessRefresh => self.refresh_process_details(cx),
-            Action::ProcessToggleRaw => {
-                if let Some(Modal::ProcessDetails {
-                    raw_expanded,
-                    preview: true,
-                    ..
-                }) = &mut self.modal
-                {
-                    *raw_expanded = !*raw_expanded;
-                    cx.notify();
-                }
-            }
-            Action::ProcessToggleCommand => {
-                if let Some(Modal::ProcessDetails {
-                    command_expanded,
-                    preview: true,
-                    ..
-                }) = &mut self.modal
-                {
-                    *command_expanded = !*command_expanded;
-                    cx.notify();
-                }
-            }
             Action::ProcessAttemptFixture { phase } => self.qa_process_attempt(&phase, cx),
             Action::ProcessConfirmFixture { force } => self.qa_process_confirm(force, window, cx),
             Action::ProcessConfirmSubmitFixture => {

@@ -192,9 +192,7 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "process_sort" => ("切换排序", "Change sort order"),
         "process_full_command" => ("完整命令", "Full command"),
         "process_copy_command" => ("复制完整命令", "Copy full command"),
-        "process_expand_command" => ("展开命令", "Expand command"),
-        "process_collapse_command" => ("收起命令", "Collapse command"),
-        "process_raw_status" => ("原始状态", "Raw status"),
+        "process_additional_status" => ("补充状态", "Additional status"),
         "process_action" => ("操作", "Action"),
         "process_offline" => (
             "连接已断开，原进程无法核实",

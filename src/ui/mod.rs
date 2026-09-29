@@ -1269,15 +1269,26 @@ impl Workbench {
         self.tick_updates(window, cx);
         // Resource detail and process/port dialogs stay open across samples; keep
         // sampling while they are visible so their data refreshes live.
-        if self.active_tool() == Some(Tool::System)
+        let detail_owner = match &self.modal {
+            Some(Modal::ProcessDetails {
+                owner,
+                preview: false,
+                ..
+            }) => Some(*owner),
+            _ => None,
+        };
+        let overview_visible = self.active_tool() == Some(Tool::System)
             && self.modal.as_ref().is_none_or(|modal| {
                 matches!(
                     modal,
                     Modal::ResourceDetails { .. } | Modal::SystemTools { .. }
                 )
-            })
-        {
-            if let Some(pane) = self.active_pane() {
+            });
+        if detail_owner.is_some() || overview_visible {
+            if let Some(pane) = detail_owner
+                .and_then(|owner| self.pane(owner))
+                .or_else(|| overview_visible.then(|| self.active_pane()).flatten())
+            {
                 if pane.state == ConnectionState::Connected
                     && matches!(pane.spec, SessionSpec::Ssh { .. })
                     && pane
@@ -1969,8 +1980,10 @@ impl Workbench {
                 request,
                 result,
             } => {
+                let mut accepted = false;
                 if let Some(pane) = self.pane_mut(owner) {
                     if pane.monitor_request == Some(request) {
+                        accepted = true;
                         pane.monitor_request = None;
                         pane.last_sample = Instant::now();
                         match result {
@@ -1996,6 +2009,15 @@ impl Workbench {
                             Err(error) => pane.monitor_error = Some(error),
                         }
                     }
+                }
+                // Only a current, owner-matched sample may trigger another detail read.
+                // The refresh path checks identity and suppresses overlapping requests.
+                if accepted
+                    && matches!(&self.modal,
+                    Some(Modal::ProcessDetails { owner: current, preview: false, .. })
+                        if *current == owner)
+                {
+                    self.refresh_process_details(cx);
                 }
             }
             Event::ProcessDetails {

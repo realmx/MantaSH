@@ -4,6 +4,28 @@ use mantash::{
     processes::{self, Action, Identity, Outcome},
 };
 
+#[test]
+fn supplementary_status_omits_summary_fields_without_losing_distinct_data() {
+    let status = "Name:\tworker\nState:\tS (sleeping)\nPid:\t42\nPPid:\t1\nVmRSS:\t2048 kB\nTgid:\t42\nUid:\t1000\t1000\t1000\t1000\nVmHWM:\t4096 kB\nThreads:\t8\nFutureField:\tvalue:detail\nunknown line\n";
+    let details = processes::Details {
+        command: "worker --serve".into(),
+        status: status.into(),
+    };
+    assert_eq!(
+        details.supplementary_status(),
+        "Name:\tworker\nTgid:\t42\nUid:\t1000\t1000\t1000\t1000\nVmHWM:\t4096 kB\nThreads:\t8\nFutureField:\tvalue:detail\nunknown line"
+    );
+    assert_eq!(details.status, status);
+    assert!(
+        processes::Details {
+            command: String::new(),
+            status: String::new()
+        }
+        .supplementary_status()
+        .is_empty()
+    );
+}
+
 const BOOT: &str = "59372983-86ce-4bae-9f6a-555ef0db8dc8";
 fn identity() -> Identity {
     Identity {

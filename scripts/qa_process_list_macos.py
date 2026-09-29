@@ -34,6 +34,11 @@ def assert_columns(view):
         row = cells[f"row_{key}"]
         assert abs(header["x"] - row["x"]) <= 1, (key, header, row)
         assert abs(header["width"] - row["width"]) <= 1, (key, header, row)
+    for key in ("pid", "name"):
+        first = cells[f"first_row_{key}"]
+        header = cells[f"header_{key}"]
+        assert abs(first["x"] - header["x"]) <= 1, (key, first, header)
+        assert abs(first["width"] - header["width"]) <= 1, (key, first, header)
     assert cells["toolbar"]["y"] < cells["columns"]["y"] < cells["viewport"]["y"]
     assert 20 <= cells["first_row"]["height"] <= 48
     assert view["max_x"] <= 1, view["max_x"]

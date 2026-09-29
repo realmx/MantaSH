@@ -143,8 +143,6 @@ pub(super) enum Modal {
         result: Option<Result<crate::processes::Details, String>>,
         refreshing: bool,
         refresh_error: Option<String>,
-        raw_expanded: bool,
-        command_expanded: bool,
         /// Isolated debug fixture; its action buttons and signal route are disabled.
         preview: bool,
     },
@@ -3184,10 +3182,7 @@ impl Workbench {
                 owner,
                 process,
                 result,
-                refreshing,
                 refresh_error,
-                raw_expanded,
-                command_expanded,
                 ..
             } => {
                 title = self.t("process_details").into();
@@ -3204,37 +3199,47 @@ impl Workbench {
                 });
                 let unavailable_key = self.process_action_reason(*owner, process);
                 let pid = process.pid;
-                body = body.child(
+                // Labels and values share a row; values may wrap without squeezing labels.
+                let field = |label: &str, value: String, prominent: bool| {
                     div()
-                        .w_full()
                         .min_w_0()
                         .flex()
-                        .flex_col()
+                        .items_start()
                         .gap(px(theme::SPACE_CONTROL))
-                        .pb(px(theme::SPACE_PANEL))
-                        .border_b_1()
-                        .border_color(p.border)
                         .child(
                             div()
-                                .w_full()
+                                .flex_none()
+                                .text_color(p.muted)
+                                .child(label.to_string()),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
                                 .min_w_0()
+                                .whitespace_normal()
+                                .when(prominent, |value| value.font_weight(FontWeight::SEMIBOLD))
+                                .child(value),
+                        )
+                };
+                body = body.gap(px(theme::SPACE_PANEL)).child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .min_w_0()
+                        .grid()
+                        .grid_cols(2)
+                        .gap(px(theme::SPACE_SECTION))
+                        .child(self.measure_process_region("detail_identity", cx))
+                        .child(
+                            div()
                                 .flex()
                                 .items_center()
                                 .gap(px(theme::SPACE_CONTROL))
+                                .child(div().text_color(p.muted).child("PID"))
                                 .child(
                                     div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .whitespace_normal()
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .text_size(px(self.prefs.ui_size + 2.))
-                                        .child(process.command.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .text_color(p.muted)
-                                        .child(format!("PID {pid}")),
+                                        .child(pid.to_string()),
                                 )
                                 .child(
                                     self.button("copy-process-pid", "")
@@ -3247,15 +3252,21 @@ impl Workbench {
                                         .on_click(move |_, _, cx| {
                                             cx.write_to_clipboard(ClipboardItem::new_string(
                                                 pid.to_string(),
-                                            ))
+                                            ));
                                         }),
                                 ),
-                        ),
+                        )
+                        .child(field(
+                            self.t("process_state"),
+                            current
+                                .map_or("—", |process| process.state.as_str())
+                                .to_string(),
+                            false,
+                        )),
                 );
                 // Keep operation outcomes and data availability together, above the metrics.
                 if attempt.is_some()
                     || unavailable.is_some()
-                    || *refreshing
                     || refresh_error.is_some()
                     || matches!(result, Some(Err(_)))
                 {
@@ -3304,9 +3315,6 @@ impl Workbench {
                             status = status.child(div().whitespace_normal().child(self.t(key)));
                         }
                     }
-                    if *refreshing {
-                        status = status.child(self.t("loading"));
-                    }
                     if let Some(error) = refresh_error {
                         status = status.child(div().whitespace_normal().child(error.clone()));
                     }
@@ -3326,100 +3334,72 @@ impl Workbench {
                             .to_string()
                     })
                     .unwrap_or_else(|| "—".into());
-                let metrics = [
+                let fields = [
                     (
                         "CPU",
                         current
                             .filter(|p| p.cpu.is_finite())
                             .map(|p| format!("{:.1}%", p.cpu))
                             .unwrap_or_else(|| "—".into()),
+                        true,
                     ),
                     (
                         self.t("process_resident_memory"),
                         current
                             .map(|p| crate::monitor::bytes(p.rss))
                             .unwrap_or_else(|| "—".into()),
+                        true,
                     ),
-                ];
-                body = body.child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .grid()
-                        .grid_cols(2)
-                        .gap(px(theme::SPACE_PANEL))
-                        .children(metrics.into_iter().map(|(label, value)| {
-                            div()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap(px(theme::SPACE_SMALL))
-                                .child(div().text_color(p.muted).child(label))
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .whitespace_normal()
-                                        .text_size(px(self.prefs.ui_size + 2.))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child(value),
-                                )
-                        })),
-                );
-                let metadata = [
                     (
                         self.t("username"),
                         current
                             .map(|p| p.user.clone())
                             .unwrap_or_else(|| "—".into()),
-                    ),
-                    (
-                        self.t("process_state"),
-                        current
-                            .map(|p| p.state.clone())
-                            .unwrap_or_else(|| "—".into()),
+                        false,
                     ),
                     (
                         self.t("process_parent_pid"),
                         current
                             .map(|p| p.parent.to_string())
                             .unwrap_or_else(|| "—".into()),
+                        false,
                     ),
-                    (self.t("started"), started),
                 ];
                 body = body.child(
                     div()
-                        .w_full()
-                        .min_w_0()
-                        .grid()
-                        .grid_cols(2)
-                        .gap_x(px(theme::SPACE_PANEL))
-                        .gap_y(px(theme::SPACE_CONTROL))
-                        .pt(px(theme::SPACE_PANEL))
-                        .border_t_1()
-                        .border_color(p.border)
-                        .children(metadata.into_iter().map(|(label, value)| {
-                            div()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap(px(theme::SPACE_SMALL))
-                                .child(div().text_color(p.muted).child(label))
-                                .child(div().min_w_0().whitespace_normal().child(value))
-                        })),
-                );
-                let details = result.as_ref().and_then(|r| r.as_ref().ok());
-                let long_command = details.is_some_and(|d| d.command.chars().count() > 160);
-                let command = details.map(|d| d.command.clone());
-                body = body.child(
-                    div()
+                        .relative()
                         .w_full()
                         .min_w_0()
                         .flex()
                         .flex_col()
                         .gap(px(theme::SPACE_CONTROL))
-                        .pt(px(theme::SPACE_PANEL))
+                        .child(self.measure_process_region("detail_metrics", cx))
+                        .child(
+                            div()
+                                .grid()
+                                .grid_cols(2)
+                                .gap_x(px(theme::SPACE_SECTION))
+                                .gap_y(px(theme::SPACE_CONTROL))
+                                .children(fields.into_iter().map(|(label, value, prominent)| {
+                                    field(label, value, prominent)
+                                })),
+                        )
+                        .child(field(self.t("started"), started, false)),
+                );
+                let details = result.as_ref().and_then(|r| r.as_ref().ok());
+                let command = details.map(|d| d.command.clone());
+                body = body.child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(theme::SPACE_CONTROL))
+                        .pt(px(theme::SPACE_CONTROL))
                         .border_t_1()
                         .border_color(p.border)
+                        .child(self.measure_process_region("detail_command", cx))
                         .child(
                             div()
                                 .w_full()
@@ -3455,11 +3435,7 @@ impl Workbench {
                             div()
                                 .w_full()
                                 .min_w_0()
-                                .when(long_command && !*command_expanded, |d| {
-                                    d.max_h(px(96.)).overflow_hidden()
-                                })
-                                .border_1()
-                                .border_color(p.border)
+                                .rounded(px(theme::SPACE_SMALL))
                                 .bg(p.terminal)
                                 .p(px(theme::SPACE_CONTROL))
                                 .font_family(self.prefs.terminal_font.clone())
@@ -3475,85 +3451,38 @@ impl Workbench {
                                         })
                                         .to_string(),
                                 ),
-                        )
-                        .when(long_command, |section| {
-                            section.child(
-                                self.button(
-                                    "toggle-process-command",
-                                    self.t(if *command_expanded {
-                                        "process_collapse_command"
-                                    } else {
-                                        "process_expand_command"
-                                    }),
-                                )
-                                .icon(if *command_expanded {
-                                    IconName::ChevronUp
-                                } else {
-                                    IconName::ChevronDown
-                                })
-                                .ghost()
-                                .on_click(cx.listener(
-                                    |this, _, _, cx| {
-                                        if let Some(Modal::ProcessDetails {
-                                            command_expanded,
-                                            ..
-                                        }) = &mut this.modal
-                                        {
-                                            *command_expanded = !*command_expanded;
-                                            cx.notify();
-                                        }
-                                    },
-                                )),
-                            )
-                        }),
+                        ),
                 );
                 if let Some(details) = details {
-                    body = body.child(
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(theme::SPACE_CONTROL))
-                            .pt(px(theme::SPACE_PANEL))
-                            .border_t_1()
-                            .border_color(p.border)
-                            .child(
-                                self.button("toggle-process-raw", self.t("process_raw_status"))
-                                    .icon(if *raw_expanded {
-                                        IconName::ChevronUp
-                                    } else {
-                                        IconName::ChevronDown
-                                    })
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        if let Some(Modal::ProcessDetails {
-                                            raw_expanded, ..
-                                        }) = &mut this.modal
-                                        {
-                                            *raw_expanded = !*raw_expanded;
-                                            cx.notify();
-                                        }
-                                    })),
-                            )
-                            .when(*raw_expanded, |section| {
-                                section.child(
+                    let status = details.supplementary_status();
+                    if !status.is_empty() {
+                        body = body.child(
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(px(theme::SPACE_CONTROL))
+                                .pt(px(theme::SPACE_CONTROL))
+                                .border_t_1()
+                                .border_color(p.border)
+                                .child(
                                     div()
-                                        .id("process-raw-status")
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(self.t("process_additional_status")),
+                                )
+                                .child(
+                                    div()
                                         .w_full()
                                         .min_w_0()
-                                        .max_h(px(160.))
-                                        .overflow_y_scroll()
-                                        .border_1()
-                                        .border_color(p.border)
                                         .bg(p.terminal)
                                         .p(px(theme::SPACE_CONTROL))
                                         .whitespace_normal()
                                         .font_family(self.prefs.terminal_font.clone())
-                                        .child(details.status.clone()),
-                                )
-                            }),
-                    );
+                                        .child(status),
+                                ),
+                        );
+                    }
                 }
                 let owner = *owner;
                 let process = process.clone();

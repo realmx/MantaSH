@@ -80,6 +80,22 @@ pub struct Details {
     pub status: String,
 }
 
+impl Details {
+    /// Display /proc status fields not already covered by the process summary.
+    /// Preserve identifiers such as Uid/Tgid and unknown fields: they are not duplicates.
+    pub fn supplementary_status(&self) -> String {
+        self.status
+            .lines()
+            .filter(|line| {
+                !line.split_once(':').is_some_and(|(key, _)| {
+                    matches!(key.trim(), "State" | "Pid" | "PPid" | "VmRSS")
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
 /// Both probes compare identities immediately before the operation. No name or command
 /// received from the server is interpolated. POSIX kill still has a small check/send race.
 fn script(identity: &Identity, operation: &str) -> Result<String> {

@@ -43,7 +43,7 @@ def main():
     checks = []
     try:
         driver.wait(lambda s: len(s["tabs"]) == 1, "startup")
-        for ui, night in ((14, False), (18, True)):
+        for ui, night in ((12, False), (14, False), (18, True)):
             driver.action("font_sizes", ui=ui, terminal=12)
             driver.action("theme", night=night)
             driver.action("process_fixture", mode="ready")
@@ -52,18 +52,28 @@ def main():
             assert state["modal"] == "process_details" and view["preview"]
             assert view["metrics"]["user"] == "qa-user" and view["metrics"]["parent"] == 99
             assert view["metrics"]["cpu"] == 12.5 and view["metrics"]["rss"] == 2_097_152
-            assert view["command_len"] > 0 and view["raw_len"] > 1000 and not view["raw_expanded"]
+            assert view["command_len"] > 0 and view["raw_len"] > 1000
             assert not view["signal_enabled"] and view["action_reason"] == "process_preview_only"
             assert view["footer_bounds"] and state["modal_scroll"]["bounds"]["height"] > 100
             centered(state)
+            geometry = view["geometry"]
+            identity, metrics, command = (geometry[f"detail_{name}"] for name in ("identity", "metrics", "command"))
+            assert state["modal_scroll"]["max_x"] <= 1, "detail must not scroll horizontally"
+            assert identity["height"] <= 32, identity
+            assert metrics["height"] <= 3 * ui * 1.75 + 16, metrics
+            assert abs(metrics["y"] - identity["y"] - identity["height"] - 12) <= 1
+            assert abs(command["y"] - metrics["y"] - metrics["height"] - 12) <= 1
+            assert command["y"] - identity["y"] < 160, geometry
             checks.append(f"{ui}px {'dark' if night else 'light'} detail metrics, safe controls and centered frame")
 
         driver.action("resize", width=960, height=640)
         driver.wait(lambda s: s["width"] == 960 and s["height"] == 640, "minimum viewport")
-        draw(driver)
+        before_refresh = draw(driver)
         driver.action("process_refresh")
         refreshing = driver.wait(lambda s: s["process_view"] and s["process_view"]["refreshing"]
                                  and s["process_view"]["command_len"] > 0, "old command retained during refresh")
+        refreshing = draw(driver)
+        assert refreshing["modal_scroll"] == before_refresh["modal_scroll"], "refresh must not shift the content"
         request = refreshing["process_view"]["request"]
         driver.action("process_reply", stale=True, error=True)
         old = driver.action("snapshot")["process_view"]
@@ -76,31 +86,19 @@ def main():
         driver.action("process_reply", long=True)
         long_view = draw(driver)
         assert long_view["process_view"]["command_len"] > 1000
-        assert long_view["process_view"]["long_command"] and not long_view["process_view"]["command_expanded"]
+        assert long_view["process_view"]["long_command"]
         assert long_view["modal_scroll"]["max_x"] <= 1
+        assert long_view["modal_scroll"]["max_y"] > failed["modal_scroll"]["max_y"] + 100
         centered(long_view)
-        driver.action("process_toggle_command")
-        expanded_command = draw(driver)
-        assert expanded_command["process_view"]["command_expanded"]
-        assert expanded_command["modal_scroll"]["max_y"] > long_view["modal_scroll"]["max_y"] + 100
-        assert expanded_command["modal_scroll"]["max_x"] <= 1
-        driver.action("process_toggle_command")
-        collapsed_command = draw(driver)
-        assert not collapsed_command["process_view"]["command_expanded"]
-        assert abs(collapsed_command["modal_scroll"]["max_y"] - long_view["modal_scroll"]["max_y"]) <= 2
-        checks.append("latest request wins; long command previews, expands and collapses without horizontal overflow")
+        checks.append("latest request wins; full long command is visible without expanding or horizontal overflow")
 
-        driver.action("process_toggle_raw")
-        expanded = draw(driver)
-        assert expanded["process_view"]["raw_expanded"]
-        assert expanded["modal_scroll"]["max_y"] > 100 and expanded["modal_scroll"]["max_x"] <= 1
-        footer = expanded["process_view"]["footer_bounds"]
+        footer = long_view["process_view"]["footer_bounds"]
         driver.action("scroll_modal", y=-100000)
         scrolled = draw(driver)
         assert scrolled["modal_scroll_y"] < -100
         assert abs(scrolled["process_view"]["footer_bounds"]["y"] - footer["y"]) <= 1
         centered(scrolled)
-        checks.append("long command and expanded raw status scroll within a fixed header and footer")
+        checks.append("full command and supplementary status scroll together within a fixed header and footer")
 
         for mode, issue in (("reused", "process_changed"), ("reboot", "process_changed"),
                             ("gone", "process_gone"), ("sample_error", "process_sample_unavailable"),
@@ -126,8 +124,6 @@ def main():
         checks.append("missing identity, read error and loading states remain explicit")
 
         driver.action("process_fixture", mode="ready", long=True)
-        driver.action("process_toggle_command")
-        driver.action("process_toggle_raw")
         draw(driver)
         driver.action("scroll_modal", y=-140)
         before = draw(driver)
@@ -144,8 +140,7 @@ def main():
         assert after_preview_submit["modal"] == "process_confirm" and after_preview_submit["process_view"]["attempt"] is None
         driver.action("cancel_modal")
         restored = draw(driver)
-        assert restored["modal"] == "process_details" and restored["process_view"]["raw_expanded"]
-        assert restored["process_view"]["command_expanded"]
+        assert restored["modal"] == "process_details"
         assert restored["process_view"]["command_len"] == before["process_view"]["command_len"]
         assert abs(restored["modal_scroll_y"] - old_offset) <= 2
         checks.append("TERM confirmation is signal-free; cancel restores detail text and scroll")
