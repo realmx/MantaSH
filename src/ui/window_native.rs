@@ -184,17 +184,23 @@ mod native {
             static NSAboutPanelOptionApplicationName: id;
             static NSAboutPanelOptionApplicationVersion: id;
         }
-        // Called on the UI thread after the action's update cycle, without a Workbench borrow.
         unsafe {
             let app = NSApp();
             anyhow::ensure!(app != nil, "Application is unavailable");
             let options: id = msg_send![objc::class!(NSMutableDictionary), dictionary];
             let name = NSString::alloc(nil).init_str("MantaSH");
             let version = NSString::alloc(nil).init_str(crate::APP_VERSION);
+            let copyright_key =
+                NSString::alloc(nil).init_str("NSAboutPanelOptionApplicationCopyright");
+            let copyright = NSString::alloc(nil)
+                .init_str("作者：Realm · GitHub: https://github.com/realmx/MantaSH");
             let _: () = msg_send![options, setObject:name forKey:NSAboutPanelOptionApplicationName];
             let _: () =
                 msg_send![options, setObject:version forKey:NSAboutPanelOptionApplicationVersion];
+            let _: () = msg_send![options, setObject:copyright forKey:copyright_key];
             let _: () = msg_send![app, orderFrontStandardAboutPanelWithOptions:options];
+            let _: () = msg_send![copyright_key, release];
+            let _: () = msg_send![copyright, release];
             let _: () = msg_send![name, release];
             let _: () = msg_send![version, release];
         }
@@ -506,16 +512,22 @@ mod native {
         };
         Ok(handle.hwnd.get() as HWND)
     }
+
     /// The Windows Shell owns the About dialog; no GPUI view or secondary workbench is created.
     pub(crate) struct PreparedAbout {
         hwnd: usize,
         label: Vec<u16>,
+        details: Vec<u16>,
     }
 
     pub(crate) fn prepare_about(window: &Window, version: &str) -> anyhow::Result<PreparedAbout> {
         Ok(PreparedAbout {
             hwnd: handle(window)? as usize,
             label: format!("MantaSH#{version}")
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect(),
+            details: "作者：Realm\r\nGitHub: https://github.com/realmx/MantaSH"
                 .encode_utf16()
                 .chain(std::iter::once(0))
                 .collect(),
@@ -536,7 +548,7 @@ mod native {
                     ShellAboutW(
                         hwnd,
                         self.label.as_ptr(),
-                        std::ptr::null(),
+                        self.details.as_ptr(),
                         std::ptr::null_mut(),
                     )
                 } != 0,
@@ -547,6 +559,7 @@ mod native {
     }
 
     /// Read monitor work bounds in physical pixels, then convert with this window's DPI scale.
+
     fn monitor(hwnd: HWND) -> anyhow::Result<MONITORINFO> {
         let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
         info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
