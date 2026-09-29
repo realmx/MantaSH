@@ -3,6 +3,7 @@ use crate::model::Language;
 /// Translate every product action through a single bilingual catalog.
 pub fn text(language: Language, key: &str) -> &'static str {
     let pair = match key {
+        "process_command" => ("命令", "Command"),
         "check_updates" => ("检查更新", "Check for updates"),
         "update_checking" => ("正在检查最新版本…", "Checking for the latest version…"),
         "update_no_update" => (

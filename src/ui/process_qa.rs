@@ -388,7 +388,8 @@ impl Workbench {
             .map(|index| {
                 let mut process = fixture_process();
                 process.pid = 50_000 + index as u32;
-                process.command = format!("qa-helper-{index}");
+                process.command = format!("/usr/bin/node qa-helper-{index} --mode=worker-{index}");
+                process.user = "qa-owner".into();
                 process.cpu = (count - index) as f64 / 10.;
                 process.rss = 1_048_576 * (index as u64 + 1);
                 process.identity = Some(Identity {
@@ -411,6 +412,10 @@ impl Workbench {
             return serde_json::Value::Null;
         };
         serde_json::json!({ "query":pane.process_filter.read(cx).value(),
+            "command_header":self.t("process_command"),
+            "visible_commands":pane.monitor.as_ref().filter(|sample| !sample.errors.contains_key("processes"))
+                .map(|sample| sample.processes.iter().filter(|process| process.matches_command(&pane.process_filter.read(cx).value()))
+                    .map(|process| process.command.clone()).collect::<Vec<_>>()).unwrap_or_default(),
             "sort":match pane.process_sort {
                 system::ProcessSort::Pid => "pid", system::ProcessSort::Name => "name",
                 system::ProcessSort::User => "user", system::ProcessSort::Cpu => "cpu",

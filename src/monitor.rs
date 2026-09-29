@@ -11,7 +11,7 @@ printf '__MANTASH_NET__\n'; cat /proc/net/dev 2>/dev/null || printf 'MANTASH_ERR
 printf '__MANTASH_DISK__\n'; df -Pk 2>&1
 printf '__MANTASH_BOOT__\n'; cat /proc/sys/kernel/random/boot_id 2>/dev/null; getconf CLK_TCK 2>/dev/null; awk '$1 == "btime" {print $2}' /proc/stat 2>/dev/null
 printf '__MANTASH_START_BEFORE__\n'; awk '{pid=$1; sub(/^.*\) /,""); if ($20 != "") print pid, $20}' /proc/[0-9]*/stat 2>/dev/null
-printf '__MANTASH_PROCESS_V2__\n'; ps -eo pid=,ppid=,pcpu=,pmem=,rss=,stat=,user:64=,comm= --sort=-pcpu 2>&1
+printf '__MANTASH_PROCESS_V2__\n'; ps -ww -eo pid=,ppid=,pcpu=,pmem=,rss=,stat=,user:64=,args= --sort=-pcpu 2>&1
 printf '__MANTASH_START_AFTER__\n'; awk '{pid=$1; sub(/^.*\) /,""); if ($20 != "") print pid, $20}' /proc/[0-9]*/stat 2>/dev/null
 printf '__MANTASH_PORT__\n'
 if command -v ss >/dev/null 2>&1; then
@@ -65,8 +65,16 @@ pub struct Process {
     pub memory: f64,
     pub rss: u64,
     pub state: String,
+    /// Sampled command line (executable and arguments), shared by display and filtering.
     pub command: String,
 }
+impl Process {
+    /// Case-insensitive substring search of the displayed command only.
+    pub fn matches_command(&self, query: &str) -> bool {
+        self.command.to_lowercase().contains(&query.to_lowercase())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Port {
     pub protocol: String,

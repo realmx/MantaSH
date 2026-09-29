@@ -68,6 +68,18 @@ def main():
                 few = draw(driver)
                 assert_frame(few)
                 assert few["process_list"]["total"] == 3
+                commands = [f"/usr/bin/node qa-helper-{i} --mode=worker-{i}" for i in range(3)]
+                assert few["process_list"]["visible_commands"] == commands
+                for english, caption in ((False, "命令"), (True, "Command")):
+                    driver.action("language", english=english)
+                    localized = draw(driver)
+                    assert localized["process_list"]["command_header"] == caption
+                for query, expected in (("NODE", commands), ("--mode=worker-1", [commands[1]]),
+                                        ("qa-owner", []), ("50000", []), ("not-present", []), ("", commands)):
+                    driver.action("process_list_state", query=query, y=0)
+                    result = draw(driver)
+                    assert result["process_list"]["visible_commands"] == expected, (query, result["process_list"])
+                checks.append("Command header localized; full command arguments shown and matched; user/PID-only and absent keywords return no rows")
                 assert few["dialog_frame_bounds"]["height"] < 300, few["dialog_frame_bounds"]
                 assert_columns(few["process_list"])
                 viewport = few["process_list"]["bounds"]

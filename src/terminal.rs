@@ -51,15 +51,26 @@ struct ClearSequence {
     saved: bool,
     purge: bool,
     erase_viewport: bool,
+    newlines: usize,
+    home_padding: usize,
+    reclaim_padding: usize,
 }
 
 impl alacritty_terminal::vte::Perform for ClearSequence {
     fn print(&mut self, _: char) {
         self.saved = false;
+        self.newlines = 0;
+        self.home_padding = 0;
     }
 
-    fn execute(&mut self, _: u8) {
+    fn execute(&mut self, byte: u8) {
         self.saved = false;
+        self.home_padding = 0;
+        match byte {
+            b'\n' => self.newlines = self.newlines.saturating_add(1),
+            b'\r' => (),
+            _ => self.newlines = 0,
+        }
     }
 
     fn csi_dispatch(
@@ -75,6 +86,22 @@ impl alacritty_terminal::vte::Perform for ClearSequence {
             .filter(|value| value.len() == 1)
             .map(|value| value[0]);
         let simple = !ignore && intermediates.is_empty() && values.next().is_none();
+        // Node readline.cursorTo(0, 0) emits CSI 1;1 H; Vite precedes it
+        // with rows-1 newlines, then emits readline.clearScreenDown (CSI 0 J).
+        let home = !ignore
+            && intermediates.is_empty()
+            && matches!(action, 'H' | 'f')
+            && params.iter().count() <= 2
+            && params.iter().all(|p| p.len() == 1 && p[0] <= 1);
+        if home {
+            self.home_padding = self.newlines;
+        } else {
+            if action == 'J' && value == Some(0) && simple {
+                self.reclaim_padding = self.home_padding;
+            }
+            self.home_padding = 0;
+        }
+        self.newlines = 0;
         match (action, value) {
             ('J', Some(3)) if simple => self.saved = true,
             ('J', Some(2)) if simple => {
@@ -89,14 +116,18 @@ impl alacritty_terminal::vte::Perform for ClearSequence {
 
     fn osc_dispatch(&mut self, _: &[&[u8]], _: bool) {
         self.saved = false;
+        self.newlines = 0;
+        self.home_padding = 0;
     }
 
     fn esc_dispatch(&mut self, _: &[u8], _: bool, _: u8) {
         self.saved = false;
+        self.newlines = 0;
+        self.home_padding = 0;
     }
 
     fn terminated(&self) -> bool {
-        self.purge || self.erase_viewport
+        self.purge || self.erase_viewport || self.reclaim_padding > 0
     }
 }
 
@@ -234,6 +265,10 @@ impl TerminalBuffer {
             } else {
                 self.parser.advance(&mut self.term, &bytes[start..end]);
             }
+            if self.clear_sequence.reclaim_padding > 0 {
+                self.reclaim_refresh_padding(self.clear_sequence.reclaim_padding);
+                self.clear_sequence.reclaim_padding = 0;
+            }
             self.clear_sequence.erase_viewport = false;
             if self.clear_sequence.purge {
                 self.term.grid_mut().clear_history();
@@ -241,6 +276,35 @@ impl TerminalBuffer {
             }
             start = end;
         }
+    }
+
+    /// Vite-style refreshes scroll with blank lines, then home+ED0. Reuse the
+    /// now-empty viewport for preserved output instead of leaving it all in history.
+    /// Only the grid storage is rearranged; the PTY size and scroll region stay fixed.
+    fn reclaim_refresh_padding(&mut self, newlines: usize) {
+        if !self.local
+            || self.size.rows < 3
+            || newlines < self.size.rows - 1
+            || self
+                .term
+                .mode()
+                .intersects(TermMode::ALT_SCREEN | TermMode::ORIGIN)
+            || self.term.grid().cursor.point != Point::new(Line(0), Column(0))
+        {
+            return;
+        }
+        let restored = self.term.grid().history_size().min(self.size.rows - 1);
+        if restored == 0 {
+            return;
+        }
+        let grid = self.term.grid_mut();
+        // Growing pulls existing history into view; shrinking removes only the
+        // blank rows below the shifted cursor, keeping every preserved text row.
+        grid.resize(false, self.size.rows + restored, self.size.cols);
+        grid.resize(false, self.size.rows, self.size.cols);
+        self.term.selection = None;
+        self.command_cursor.end_editing();
+        self.overlay_dirty = true;
     }
 
     /// Preserve intermediate echo positions before a subsequent cursor-control sequence.

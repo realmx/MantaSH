@@ -80,9 +80,10 @@ QA：`scripts/qa_transfers_macos.py --directory <目录> --fixture <fixture 目�
 输出唤醒、damage 复制与刷新调度见[终端机制](terminal-reference.md)。本地实现要点：
 
 - Unix 本地 PTY 使用单一非阻塞 I/O 循环：先排空当前宽度的输出，以 500ms 稳定窗口等待 Zoom 中间尺寸结束，最终排空并重新检查队列后才更新 PTY 与仿真器网格；Windows 保留 ConPTY 既有后台路径。提示符和右侧提示始终由 Shell 的真实 SIGWINCH 重绘负责，应用不向 emulator 注入合成滚屏或提示符移动序列。
-- `TerminalBuffer` 用 VTE 状态解析器跟踪清屏边界。后台为本地会话创建 `new_local`：普通 `CSI 2 J` 在原位擦除视口，保留光标、背景和已有历史，不采用 alacritty `clear_viewport` 将当前画面移入历史的策略，避免 npm 开发服务器清屏后短输出也出现滚动条。真正换行溢出的历史仍可滚动；SSH 保留原有清屏行为。`CSI 3 J`、光标归零、`CSI 2 J` 的显式清历史组合继续处理，跨 PTY read 的转义序列由跟踪器保留状态。回归见 `tests/local_terminal_clear.rs`，覆盖短输出、分段清屏、已有历史、真实溢出、光标/背景及备用屏幕。
+- `TerminalBuffer` 用 VTE 状态解析器跟踪清屏边界。后台为本地会话创建 `new_local`：普通 `CSI 2 J` 在原位擦除视口，保留光标、背景和已有历史，不采用 alacritty `clear_viewport` 将当前画面移入历史的策略。Vite 8.3.0 使用另一种刷新序列：先连续输出约一屏换行，再 `CSI 1;1 H` 回顶并 `CSI 0 J` 擦除下方。本地普通屏幕识别连续至少 `rows-1` 个换行后紧接回顶和 ED0 的完整序列，将仍能放入空白视口的历史回填；仅重排网格存储，不修改 PTY 尺寸、不丢弃保留的输出，超出视口的实际内容仍可滚动。普通换行、局部擦除、备用屏幕与 SSH 保持既有语义。显式 `CSI 3 J` 清历史仍有效，跨 PTY read 的序列由跟踪器保留状态。回归见 `tests/local_terminal_clear.rs`。
 - `resize_local` 只在本地、可信提示符未收到输入、光标在首行、原 history 为空且其余可见行全空时，清除本次 resize 刚产生的 history（未清屏 zsh RPROMPT 的 reflow 场景）；有真实 scrollback、编辑中的命令或下方输出时保持原网格语义。输入状态只保存两个布尔值，提交后的新提示符才复位。
 - `TerminalView` 只接受与测量尺寸相同的网格帧，并在每个布局帧清空 retained canvas，避免 AppKit 动画期间的旧字形残留。
+- `scripts/qa_terminal_scroll_macos.py --binary target/debug/mantash --vite-cli <已安装的 vite/bin/vite.js> --directory <全新隔离目录>` 使用真实 npm/Vite、隔离 zsh 右提示符，验证短输出无历史、绘制所用滑块状态、窗口缩放、标签切换、溢出回滚和运行中清屏；已用 Vite 8.3.0 验证。QA 快照包含终端测量高度、行高、网格行数、历史行数、滑块参数及外层滚动范围，以区分高度溢出和终端历史，不以请求接受代替状态完成。
 
 ## 标签栏与平台标题栏
 

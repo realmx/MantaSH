@@ -73,6 +73,8 @@ pub struct TerminalView {
     measured_grid: Option<(usize, usize)>,
     #[cfg(debug_assertions)]
     pub paint_statistics: PaintStatistics,
+    #[cfg(debug_assertions)]
+    pub(super) host_scroll_metrics: std::cell::Cell<Option<(f32, f32, f32)>>,
 }
 impl EventEmitter<PaneFocused> for TerminalView {}
 impl Focusable for TerminalView {
@@ -82,6 +84,16 @@ impl Focusable for TerminalView {
 }
 
 impl TerminalView {
+    /// Geometry only, exposed by the opt-in isolated native QA driver.
+    #[cfg(debug_assertions)]
+    pub(super) fn qa_geometry(&self) -> serde_json::Value {
+        serde_json::json!({"height": f32::from(self.bounds.size.height),
+            "width": f32::from(self.bounds.size.width),
+            "line_height": f32::from(self.line_height),
+            "cell_width": f32::from(self.cell_width), "measured_grid": self.measured_grid,
+            "rendered_scroll_metrics": self.host_scroll_metrics.get()})
+    }
+
     /// Construct a view for a fixed session attempt.
     pub fn new(session: Arc<Session>, preferences: Preferences, cx: &mut Context<Self>) -> Self {
         Self {
@@ -107,6 +119,8 @@ impl TerminalView {
             measured_grid: None,
             #[cfg(debug_assertions)]
             paint_statistics: PaintStatistics::default(),
+            #[cfg(debug_assertions)]
+            host_scroll_metrics: Default::default(),
         }
     }
     /// Prepare only changed rows, and never wait on the PTY parser from a paint callback.

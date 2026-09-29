@@ -87,3 +87,100 @@ fn alternate_screen_and_remote_clear_behavior_are_preserved() {
     remote.feed(b"previous\r\n\x1b[H\x1b[2J");
     assert!(remote.term.grid().history_size() > 0);
 }
+
+fn vite_refresh(rows: usize) -> Vec<u8> {
+    // Vite 8.3.0 logger: console.log('\n'.repeat(rows - 2)),
+    // readline.cursorTo(stdout, 0, 0), readline.clearScreenDown(stdout).
+    format!("{}\x1b[1;1H\x1b[0J", "\r\n".repeat(rows - 1)).into_bytes()
+}
+
+fn visible_lines(term: &TerminalBuffer) -> Vec<String> {
+    (0..term.size.rows)
+        .map(|row| {
+            (0..term.size.cols)
+                .map(|col| term.term.grid()[Line(row as i32)][Column(col)].c)
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+#[test]
+fn actual_vite_refresh_reuses_blank_space_and_preserves_startup_lines() {
+    let sequence = vite_refresh(20);
+    for split in 0..=sequence.len() {
+        let mut term = TerminalBuffer::new_local(Encoding::Utf8);
+        term.resize_local(80, 20);
+        term.feed(b"$ npm run dev\r\n> vite --host --port 8001\r\n\r\n");
+        term.feed(&sequence[..split]);
+        term.feed(&sequence[split..]);
+        term.feed(b"\r\nVITE v8.3.0 ready\r\nLocal: http://localhost:8001/\r\n");
+        assert_eq!(term.term.grid().history_size(), 0, "split {split}");
+        assert_eq!(
+            visible_lines(&term),
+            [
+                "$ npm run dev",
+                "> vite --host --port 8001",
+                "VITE v8.3.0 ready",
+                "Local: http://localhost:8001/"
+            ]
+        );
+        assert_eq!(term.term.grid().screen_lines(), 20);
+        assert_eq!(term.size.rows, 20);
+        term.scroll(100);
+        assert_eq!(term.term.grid().display_offset(), 0);
+    }
+}
+
+#[test]
+fn vite_refresh_retains_all_real_output_when_combined_content_overflows() {
+    let mut term = TerminalBuffer::new_local(Encoding::Utf8);
+    term.resize_local(40, 8);
+    let output: String = (0..18).map(|i| format!("line-{i}\r\n")).collect();
+    term.feed(output.as_bytes());
+    term.feed(&vite_refresh(8));
+    term.feed(b"VITE ready\r\n");
+    assert!(term.term.grid().history_size() > 0);
+    let mut all = String::new();
+    for row in -(term.term.grid().history_size() as i32)..8 {
+        all.push_str(
+            &(0..40)
+                .map(|col| term.term.grid()[Line(row)][Column(col)].c)
+                .collect::<String>(),
+        );
+        all.push('\n');
+    }
+    for i in 0..18 {
+        assert!(all.contains(&format!("line-{i} ")), "missing line {i}");
+    }
+    term.scroll(1000);
+    assert!(term.term.grid().display_offset() > 0);
+    assert_eq!(term.frame().cells[0].cell.c, 'l');
+    term.scroll_bottom();
+    assert!(visible_lines(&term).iter().any(|line| line == "VITE ready"));
+}
+
+#[test]
+fn ordinary_newlines_and_non_refresh_erases_keep_their_semantics() {
+    for tail in [
+        b"\x1b[0J".as_slice(),
+        b"\x1b[2;1H\x1b[0J",
+        b"\x1b[1;1Htext\x1b[0J",
+    ] {
+        let mut term = TerminalBuffer::new_local(Encoding::Utf8);
+        term.resize_local(40, 8);
+        term.feed(b"before\r\nsecond\r\n");
+        term.feed("\r\n".repeat(7).as_bytes());
+        let history = term.term.grid().history_size();
+        assert!(history > 0);
+        term.feed(tail);
+        assert_eq!(term.term.grid().history_size(), history);
+    }
+    let mut remote = TerminalBuffer::new(Encoding::Utf8);
+    remote.resize(40, 8);
+    remote.feed(b"before\r\nsecond\r\n");
+    remote.feed(&vite_refresh(8));
+    assert!(remote.term.grid().history_size() > 0);
+}

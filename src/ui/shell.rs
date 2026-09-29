@@ -1399,6 +1399,9 @@ impl Workbench {
             );
         }
         if let Some(terminal) = &pane.terminal {
+            let metrics = terminal.read(cx).scroll_metrics();
+            #[cfg(debug_assertions)]
+            terminal.read(cx).host_scroll_metrics.set(metrics);
             // The scrollbar hangs on the padded wrapper (absolute children
             // span the padding box), so it hugs the pane edge like every
             // other overlay bar instead of floating 8px in with the text.
@@ -1409,24 +1412,29 @@ impl Workbench {
                     .min_h_0()
                     .p(px(8.))
                     .child(terminal.clone())
-                    .when_some(
-                        terminal.read(cx).scroll_metrics(),
-                        |host, (position, thumb, track)| {
-                            let _ = track;
-                            host.child(
-                                div()
-                                    .id(("terminal-scrollbar", owner.session.as_u128() as u64))
-                                    .absolute()
-                                    .top(px(2.))
-                                    .bottom(px(2.))
-                                    .right(px(1.))
-                                    .w(px(10.))
-                                    .flex_shrink_0()
-                                    .occlude()
-                                    .cursor_pointer()
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, event: &MouseDownEvent, w, cx| {
+                    .when_some(metrics, |host, (position, thumb, track)| {
+                        let _ = track;
+                        host.child(
+                            div()
+                                .id(("terminal-scrollbar", owner.session.as_u128() as u64))
+                                .absolute()
+                                .top(px(2.))
+                                .bottom(px(2.))
+                                .right(px(1.))
+                                .w(px(10.))
+                                .flex_shrink_0()
+                                .occlude()
+                                .cursor_pointer()
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, event: &MouseDownEvent, w, cx| {
+                                        this.jump_terminal_scroll(owner, event.position.y, w, cx);
+                                        cx.notify();
+                                    }),
+                                )
+                                .on_mouse_move(cx.listener(
+                                    move |this, event: &MouseMoveEvent, w, cx| {
+                                        if event.pressed_button == Some(MouseButton::Left) {
                                             this.jump_terminal_scroll(
                                                 owner,
                                                 event.position.y,
@@ -1434,35 +1442,22 @@ impl Workbench {
                                                 cx,
                                             );
                                             cx.notify();
-                                        }),
-                                    )
-                                    .on_mouse_move(cx.listener(
-                                        move |this, event: &MouseMoveEvent, w, cx| {
-                                            if event.pressed_button == Some(MouseButton::Left) {
-                                                this.jump_terminal_scroll(
-                                                    owner,
-                                                    event.position.y,
-                                                    w,
-                                                    cx,
-                                                );
-                                                cx.notify();
-                                            }
-                                        },
-                                    ))
-                                    .child(
-                                        div()
-                                            .absolute()
-                                            .top(px(2. + position))
-                                            .left(px(2.))
-                                            .w(px(6.))
-                                            .h(px(thumb))
-                                            .rounded(px(3.))
-                                            .bg(p.muted.opacity(0.55))
-                                            .hover(|style| style.bg(p.muted)),
-                                    ),
-                            )
-                        },
-                    ),
+                                        }
+                                    },
+                                ))
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .top(px(2. + position))
+                                        .left(px(2.))
+                                        .w(px(6.))
+                                        .h(px(thumb))
+                                        .rounded(px(3.))
+                                        .bg(p.muted.opacity(0.55))
+                                        .hover(|style| style.bg(p.muted)),
+                                ),
+                        )
+                    }),
             );
         } else {
             center = center.child(div().flex_1().bg(p.terminal));

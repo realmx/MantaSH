@@ -1446,17 +1446,13 @@ impl Workbench {
         };
         let sample = pane.monitor.as_ref();
         let section_error = sample.and_then(|s| s.errors.get("processes"));
-        let query = pane.process_filter.read(cx).value().to_lowercase();
+        let query = pane.process_filter.read(cx).value();
         let mut processes: Vec<&Process> = sample
             .filter(|_| section_error.is_none())
             .map(|s| {
                 s.processes
                     .iter()
-                    .filter(|process| {
-                        format!("{} {} {}", process.pid, process.command, process.user)
-                            .to_lowercase()
-                            .contains(&query)
-                    })
+                    .filter(|process| process.matches_command(&query))
                     .collect()
             })
             .unwrap_or_default();
@@ -1506,7 +1502,7 @@ impl Workbench {
             || pane.monitor_error.is_some();
         let columns = [
             (ProcessSort::Pid, "PID", 80.),
-            (ProcessSort::Name, self.t("name"), 0.),
+            (ProcessSort::Name, self.t("process_command"), 0.),
             (ProcessSort::User, self.t("username"), 80.),
             (ProcessSort::Cpu, "CPU", 72.),
             (ProcessSort::Memory, self.t("memory"), 88.),
@@ -1765,6 +1761,7 @@ impl Workbench {
                                     .children(processes.into_iter().enumerate().map(
                                         |(index, process)| {
                                             let details = process.clone();
+                                            let command_tooltip = process.command.clone();
                                             div()
                                                 .relative()
                                                 .w_full()
@@ -1803,6 +1800,13 @@ impl Workbench {
                                                 )
                                                 .child(
                                                     div()
+                                                        .id(("process-command", process.pid as u64))
+                                                        .tooltip(move |window, cx| {
+                                                            gpui_component::tooltip::Tooltip::new(
+                                                                command_tooltip.clone(),
+                                                            )
+                                                            .build(window, cx)
+                                                        })
                                                         .relative()
                                                         .flex_1()
                                                         .min_w_0()
