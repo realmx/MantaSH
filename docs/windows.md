@@ -31,6 +31,17 @@ cargo run --locked
 
 该变量只作用于当前 PowerShell。不要覆盖 HOME、USERPROFILE 或生产数据目录。
 
+## Git Bash 滚动边界自动验证
+
+在具有交互桌面的 Windows 环境安装 Git Bash、Python 3 与 Node.js，先构建 debug 程序，再运行隔离 QA（目录必须尚不存在，Shell 路径按实际安装位置调整）：
+
+```powershell
+cargo build --locked
+python scripts/qa_terminal_boundaries.py --binary target/debug/mantash.exe --shell "C:\Program Files\Git\bin\bash.exe" --directory "$env:TEMP\mantash-scroll-qa"
+```
+
+脚本只在隔离 debug QA 中指定 Shell，不修改正常偏好；经真实 ConPTY 输出不足、恰好及超出可视高度的内容，检查滚动条几何、首尾可达、清除历史及 Vite 式空行刷新，覆盖两种窗口尺寸。`terminal-boundary-results.json` 记录实际平台、Shell 和通过场景；失败时退出并保留隔离目录中的状态供排查。Node.js 仅供此测试使用，产品运行不需要。此脚本的 macOS Zsh/Bash 运行结果不代表 Windows 通过，程序化滚动也不代表物理鼠标或各 DPI 的验收。
+
 ## 实机检查清单
 
 | 范围 | 操作与预期 |

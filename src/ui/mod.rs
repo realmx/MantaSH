@@ -1000,8 +1000,17 @@ impl Workbench {
         }
     }
     pub(super) fn new_local(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.new_local_with_spec(self.local_spec(), window, cx);
+    }
+    /// Create a local tab from an explicit spec without changing shell preferences.
+    pub(super) fn new_local_with_spec(
+        &mut self,
+        spec: SessionSpec,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.compact_sidebar_open = false;
-        let pane = self.create_pane(self.local_spec(), true, window, cx);
+        let pane = self.create_pane(spec, true, window, cx);
         self.tabs.push(Tab {
             id: Id::new_v4(),
             layout: PaneLayout::single(pane.owner.session),

@@ -475,21 +475,16 @@ impl Backend {
                                     break;
                                 }
                                 let _resize = session.resize_lock.lock();
-                                if master
-                                    .resize(portable_pty::PtySize {
-                                        cols: size.cols as u16,
-                                        rows: size.rows as u16,
-                                        pixel_width: 0,
-                                        pixel_height: 0,
-                                    })
-                                    .is_err()
-                                {
+                                let changed = crate::terminal_io::resize_local_pty(
+                                    &session.terminal,
+                                    size,
+                                    |size| master.resize(size),
+                                );
+                                let Ok(changed) = changed else {
                                     let _ = session.commands.send(Command::Resize(size));
                                     drop(_resize);
                                     break 'settle_resize;
-                                }
-                                let changed =
-                                    session.terminal.lock().resize_local(size.cols, size.rows);
+                                };
                                 drop(_resize);
                                 if changed {
                                     session.output_wakeup.mark();
@@ -516,16 +511,22 @@ impl Backend {
         }
         #[cfg(not(unix))]
         {
-            // Windows keeps the blocking reader/writer arrangement; ConPTY
-            // resizing is covered by the existing platform-exempt baseline.
+            // Windows keeps the blocking reader/writer arrangement. Match the
+            // Unix local resize guard against untouched prompt reflow history;
+            // edited commands and real output must remain scrollable.
             let events = self.events.clone();
             let resize_lock = session.resize_lock.clone();
             let owner = session.owner;
             let resize_session = session.clone();
             std::thread::spawn(move || {
                 let mut pending = None;
+                let mut retry_resize = None;
                 loop {
-                    let command = pending.take().or_else(|| receiver.blocking_recv());
+                    let command = pending
+                        .take()
+                        .or_else(|| receiver.try_recv().ok())
+                        .or_else(|| retry_resize.take().map(Command::Resize))
+                        .or_else(|| receiver.blocking_recv());
                     let Some(command) = command else { break };
                     match command {
                         Command::Input(data) => {
@@ -538,6 +539,7 @@ impl Backend {
                             }
                         }
                         Command::Resize(size) => {
+                            retry_resize = None;
                             let mut size = size;
                             loop {
                                 match receiver.try_recv() {
@@ -550,18 +552,24 @@ impl Backend {
                                 }
                             }
                             let _resize = resize_lock.lock();
-                            let _ = master.resize(portable_pty::PtySize {
-                                cols: size.cols as u16,
-                                rows: size.rows as u16,
-                                pixel_width: 0,
-                                pixel_height: 0,
-                            });
-                            let changed =
-                                resize_session.terminal.lock().resize(size.cols, size.rows);
+                            let changed = crate::terminal_io::resize_local_pty(
+                                &resize_session.terminal,
+                                size,
+                                |size| master.resize(size),
+                            );
                             drop(_resize);
-                            if changed {
-                                resize_session.output_wakeup.mark();
-                                let _ = events.try_send(Event::Output(owner));
+                            match changed {
+                                Ok(true) => {
+                                    resize_session.output_wakeup.mark();
+                                    let _ = events.try_send(Event::Output(owner));
+                                }
+                                Ok(false) => {}
+                                Err(_) => {
+                                    // Preserve queued input/close and prefer a newer size
+                                    // before retrying. Never parse using an unaccepted size.
+                                    retry_resize = Some(size);
+                                    std::thread::sleep(Duration::from_millis(20));
+                                }
                             }
                         }
                         Command::Close => {

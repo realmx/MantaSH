@@ -25,6 +25,53 @@ fn short_output_and_split_npm_clear_do_not_create_history() {
         assert_eq!(term.term.grid().history_size(), 0);
     }
 }
+#[test]
+fn local_scroll_boundaries_and_resize_history_are_real_content_only() {
+    let mut short = TerminalBuffer::new_local(Encoding::Utf8);
+    short.resize_local(40, 4);
+    short.feed(b"one\r\ntwo\r\nthree");
+    assert_eq!(short.term.grid().history_size(), 0);
+    short.scroll(i32::MAX);
+    assert_eq!(short.term.grid().display_offset(), 0);
+
+    let mut exact = TerminalBuffer::new_local(Encoding::Utf8);
+    exact.resize_local(40, 4);
+    exact.feed(b"one\r\ntwo\r\nthree\r\nfour");
+    assert_eq!(exact.term.grid().history_size(), 0);
+    exact.scroll(i32::MAX);
+    assert_eq!(exact.term.grid().display_offset(), 0);
+
+    let mut overflow = TerminalBuffer::new_local(Encoding::Utf8);
+    overflow.resize_local(40, 4);
+    overflow.feed(b"one\r\ntwo\r\nthree\r\nfour\r\nfive");
+    let history = overflow.term.grid().history_size();
+    assert!(history > 0);
+    overflow.scroll(i32::MAX);
+    assert_eq!(overflow.term.grid().display_offset(), history);
+    assert_eq!(overflow.frame().cells[0].cell.c, 'o');
+    overflow.scroll_bottom();
+    assert_eq!(overflow.term.grid().display_offset(), 0);
+    assert!(visible_lines(&overflow).iter().any(|line| line == "five"));
+
+    let mut resized = TerminalBuffer::new_local(Encoding::Utf8);
+    resized.resize_local(40, 8);
+    resized.set_shell_token("scroll-test".into());
+    resized.feed(b"$ \x1b]777;mantash-cursor;scroll-test;ready\x07");
+    resized.resize_local(40, 4);
+    assert_eq!(resized.term.grid().history_size(), 0);
+    resized.scroll(i32::MAX);
+    assert_eq!(resized.term.grid().display_offset(), 0);
+    let mut retained = TerminalBuffer::new_local(Encoding::Utf8);
+    retained.resize_local(40, 4);
+    retained.feed(b"one\r\ntwo\r\nthree\r\nfour\r\nfive");
+    assert!(retained.term.grid().history_size() > 0);
+    retained.resize_local(40, 3);
+    assert!(retained.term.grid().history_size() > 0);
+    retained.scroll(i32::MAX);
+    assert_eq!(retained.frame().cells[0].cell.c, 'o');
+    retained.scroll_bottom();
+    assert!(visible_lines(&retained).iter().any(|line| line == "five"));
+}
 
 #[test]
 fn real_overflow_remains_scrollable_before_and_after_viewport_erase() {

@@ -32,6 +32,8 @@ iTerm2 将终端文本作为专门的网格和 GPU 内容处理：Metal 绘制�
 
 `OutputWakeup` 的标记和快照确认都在终端网格锁保护范围内协调：新输出不会因为正在确认上一帧而丢失；后台标签再次显示后确认最新快照，随后的输出可以重新发出唤醒。关闭/重连继续依赖 session UUID + attempt UUID，旧结果不会作用于新实例。本地 PTY 的非阻塞 resize 循环与清屏/回填保护见[开发验证](development.md#本地终端与-pty)。
 
+本地终端的网格 resize 在 Unix 与 Windows ConPTY 路径都经 `terminal_io::resize_local_pty` 提交：先让 OS PTY 接受尺寸，成功后才调用 `resize_local` 更新网格；失败不改网格或清除历史。Windows 后台短暂退避后重试，优先处理队列中的输入、关闭和更新的尺寸。仅在没有真实 scrollback、未编辑提示符位于首行且其余行为空时，清除提示符重排产生的历史；已编辑命令及真实输出保留。滚动条只在存在历史行时显示，真实溢出可滚到首尾。网格回归和 macOS Zsh/Bash 原生 PTY 验证覆盖不足、恰好填满、超出视口、清屏及 Vite 式刷新；Windows Git Bash/ConPTY 的截图场景尚未实机复现，不能仅凭调用路径修复确认其全部成因。
+
 ## 验证边界
 
 回归覆盖 core、终端绘制与更新、真实本地 PTY、Shell 历史和 SSH/SFTP 场景；这些内容描述测试范围，不代替平台人工验收。项目不宣称提供 iTerm2 的全部功能、帧率或键盘到屏幕延迟；原生 IME、真实触控板、长时间 TUI、多窗口及 Windows 仍按平台清单验收，iTerm2 的专有协议、tmux 集成、即时回放等产品功能不进入本项目范围。

@@ -184,6 +184,8 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "process_state" => ("状态", "State"),
         "process_parent_pid" => ("父 PID", "Parent PID"),
         "process_resident_memory" => ("常驻内存", "Resident memory"),
+        "process_resources" => ("资源占用", "Resource usage"),
+        "process_runtime" => ("运行信息", "Runtime information"),
         "process_old_data" => (
             "刷新失败，显示上次采样",
             "Refresh failed; showing last sample",

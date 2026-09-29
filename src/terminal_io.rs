@@ -1,6 +1,71 @@
 //! Output wakeup coalescing and precise input deltas, independent of the native view.
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Commit local grid geometry only after the OS PTY accepts the same size.
+/// Both local workers use this under their shared resize/output lock. Do not
+/// hold the terminal lock during the OS call: native painting must stay free.
+pub(crate) fn resize_local_pty<E>(
+    terminal: &parking_lot::Mutex<crate::terminal::TerminalBuffer>,
+    size: crate::terminal::GridSize,
+    resize: impl FnOnce(portable_pty::PtySize) -> Result<(), E>,
+) -> Result<bool, E> {
+    resize(portable_pty::PtySize {
+        cols: size.cols as u16,
+        rows: size.rows as u16,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
+    Ok(terminal.lock().resize_local(size.cols, size.rows))
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::*;
+    use crate::{
+        encoding::Encoding,
+        terminal::{GridSize, TerminalBuffer},
+    };
+    use alacritty_terminal::grid::Dimensions;
+    use parking_lot::Mutex;
+
+    #[test]
+    fn failed_pty_resize_preserves_grid_and_success_commits_local_semantics() {
+        let terminal = Mutex::new(TerminalBuffer::new_local(Encoding::Utf8));
+        {
+            let mut buffer = terminal.lock();
+            buffer.resize_local(282, 2);
+            buffer.set_shell_token("resize-fixture".into());
+            buffer.feed(b"$ \x1b]777;mantash-cursor;resize-fixture;ready\x07");
+            buffer.feed(b"\x1b[260G[right prompt]\x1b[3G");
+        }
+        let size = GridSize { cols: 174, rows: 1 };
+        let revision = terminal.lock().revision;
+        let failed = resize_local_pty(&terminal, size, |requested| {
+            assert_eq!((requested.cols, requested.rows), (174, 1));
+            let buffer = terminal
+                .try_lock()
+                .expect("OS resize must not lock the grid");
+            assert_eq!(buffer.size, GridSize { cols: 282, rows: 2 });
+            Err("PTY rejected resize")
+        });
+        assert_eq!(failed, Err("PTY rejected resize"));
+        {
+            let buffer = terminal.lock();
+            assert_eq!(buffer.size, GridSize { cols: 282, rows: 2 });
+            assert_eq!(buffer.revision, revision);
+            assert!(buffer.command_cursor.editing());
+            assert_eq!(buffer.term.grid().history_size(), 0);
+        }
+        assert_eq!(
+            resize_local_pty(&terminal, size, |_| Ok::<_, ()>(())),
+            Ok(true)
+        );
+        let buffer = terminal.lock();
+        assert_eq!(buffer.size, size);
+        assert_eq!(buffer.term.grid().history_size(), 0);
+    }
+}
+
 /// Forward only mouse modes requested by the foreground terminal application.
 pub fn mouse_bytes(
     mode: alacritty_terminal::term::TermMode,

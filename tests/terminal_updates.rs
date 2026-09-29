@@ -140,6 +140,29 @@ fn clear_from_scrollback_repaints_the_live_viewport() {
 }
 
 #[test]
+fn local_resize_drops_only_untouched_prompt_reflow_history() {
+    for local_resize in [false, true] {
+        let mut term = TerminalBuffer::new_local(Encoding::Utf8);
+        term.resize_local(282, 2);
+        term.set_shell_token("test-session".into());
+        term.feed(b"$ \x1b]777;mantash-cursor;test-session;ready\x07");
+        // Shell-owned right prompt, with the editing cursor restored to the left.
+        term.feed(b"\x1b[260G[right prompt]\x1b[3G");
+        assert!(term.command_cursor.editing());
+        assert_eq!(term.term.grid().history_size(), 0);
+        if local_resize {
+            term.resize_local(174, 1);
+            assert_eq!(term.term.grid().history_size(), 0);
+            term.scroll(i32::MAX);
+            assert_eq!(term.term.grid().display_offset(), 0);
+        } else {
+            term.resize(174, 1);
+            assert!(term.term.grid().history_size() > 0);
+        }
+    }
+}
+
+#[test]
 fn local_resize_keeps_wrapped_command_text_in_scrollback() {
     let mut term = TerminalBuffer::new(Encoding::Utf8);
     term.resize_local(282, 2);

@@ -177,6 +177,7 @@ cargo test --locked --no-default-features --test ssh_sftp native_qa_fixture -- -
 | `qa_modal_widths_macos.py` | 各弹窗外框宽度上限与居中误差 |
 | `qa_history_connection_modals_macos.py` | 历史与连接库弹窗隔离回归 |
 | `qa_process_list_macos.py` / `qa_process_details_macos.py` | 进程列表几何与详情身份/确认/过期回复 |
+| `qa_terminal_boundaries.py --binary <debug 程序> --directory <新目录> [--shell <Bash/Zsh 路径>]` | 通过 Node.js 和真实 PTY 检查不足、恰好及超出视口、首尾可达、清屏和 Vite 式刷新，覆盖两种窗口尺寸；Windows 必须指定 Git Bash，报告记录实际平台/Shell；不代替物理鼠标验收 |
 | `qa_ports_macos.py` | 端口列表几何、筛选、排序、展开与复制（`--binary target/debug/mantash`） |
 | `qa_overview_layout_macos.py` | 概览布局测量（`--binary <debug 可执行文件>`） |
 | `qa_connection_duplicate_macos.py` | 同一 fixture 资料经真实 Enter 连续打开两次，断言两个独立标签（回环无监听端口，会话自行失败） |

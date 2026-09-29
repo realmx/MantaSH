@@ -258,7 +258,11 @@ pub enum Action {
     Dismiss,
     /// Route cancellation through the production confirm-aware close handler.
     CancelModal,
-    Local,
+    Local {
+        /// Explicit shell for isolated cross-platform PTY acceptance.
+        #[serde(default)]
+        shell: Option<String>,
+    },
     Split {
         vertical: bool,
     },
@@ -1425,7 +1429,17 @@ impl Workbench {
             }
             Action::Dismiss => self.dismiss(window, cx),
             Action::CancelModal => self.cancel_modal(window, cx),
-            Action::Local => self.new_local(window, cx),
+            Action::Local { shell } => {
+                if let Some(shell) = shell {
+                    let mut spec = self.local_spec();
+                    if let SessionSpec::Local { shell: target, .. } = &mut spec {
+                        *target = shell;
+                    }
+                    self.new_local_with_spec(spec, window, cx);
+                } else {
+                    self.new_local(window, cx);
+                }
+            }
             Action::Split { vertical } => self.split(
                 if vertical {
                     Split::Vertical
