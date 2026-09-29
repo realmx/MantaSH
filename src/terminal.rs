@@ -50,6 +50,7 @@ impl Dimensions for GridSize {
 struct ClearSequence {
     saved: bool,
     purge: bool,
+    erase_viewport: bool,
 }
 
 impl alacritty_terminal::vte::Perform for ClearSequence {
@@ -77,6 +78,7 @@ impl alacritty_terminal::vte::Perform for ClearSequence {
         match (action, value) {
             ('J', Some(3)) if simple => self.saved = true,
             ('J', Some(2)) if simple => {
+                self.erase_viewport = true;
                 self.purge = self.saved;
                 self.saved = false;
             }
@@ -94,7 +96,7 @@ impl alacritty_terminal::vte::Perform for ClearSequence {
     }
 
     fn terminated(&self) -> bool {
-        self.purge
+        self.purge || self.erase_viewport
     }
 }
 
@@ -117,6 +119,7 @@ pub struct TerminalBuffer {
     // Only booleans: no command text or raw input is retained for resize decisions.
     prompt_touched: bool,
     prompt_submitted: bool,
+    local: bool,
 }
 
 #[derive(Clone)]
@@ -168,6 +171,14 @@ impl TerminalBuffer {
             cursor_markers: Default::default(),
             prompt_touched: false,
             prompt_submitted: false,
+            local: false,
+        }
+    }
+    /// Local consoles erase the visible screen in place on ED2; genuine scrollback is retained.
+    pub fn new_local(encoding: Encoding) -> Self {
+        Self {
+            local: true,
+            ..Self::new(encoding)
         }
     }
     /// Decode whole stream chunks, preserving partial multibyte sequences between calls.
@@ -200,8 +211,8 @@ impl TerminalBuffer {
         self.prompt_touched = false;
         self.prompt_submitted = false;
     }
-    /// Preserve the intent of `CSI 3 J` followed by `CSI 2 J`: alacritty's
-    /// viewport erase moves rows into history after the saved history was purged.
+    /// Split at viewport erases so local ED2 does not manufacture scrollback.
+    /// Explicit saved-history erase retains its existing cross-chunk semantics.
     fn advance_ansi(&mut self, bytes: &[u8]) {
         let mut start = 0;
         while start < bytes.len() {
@@ -209,7 +220,21 @@ impl TerminalBuffer {
                 .clear_parser
                 .advance_until_terminated(&mut self.clear_sequence, &bytes[start..]);
             let end = start + consumed;
-            self.parser.advance(&mut self.term, &bytes[start..end]);
+            if self.local && self.clear_sequence.erase_viewport {
+                // The final J is isolated even if the CSI started in a previous feed.
+                // Cancel that pending CSI in the processor, then use its ordinary ED0
+                // handler from the origin to erase all rows without clear_viewport's
+                // implicit scroll. ED2 must preserve the cursor and existing history.
+                self.parser.advance(&mut self.term, &bytes[start..end - 1]);
+                self.parser.advance(&mut self.term, b"\x18");
+                let cursor = self.term.grid().cursor.point;
+                self.term.grid_mut().cursor.point = Point::new(Line(0), Column(0));
+                ansi::Handler::clear_screen(&mut self.term, ansi::ClearMode::Below);
+                self.term.grid_mut().cursor.point = cursor;
+            } else {
+                self.parser.advance(&mut self.term, &bytes[start..end]);
+            }
+            self.clear_sequence.erase_viewport = false;
             if self.clear_sequence.purge {
                 self.term.grid_mut().clear_history();
                 self.clear_sequence.purge = false;

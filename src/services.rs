@@ -180,7 +180,11 @@ impl Backend {
         let (commands, receiver) = mpsc::unbounded_channel();
         let session = Arc::new(Session {
             owner,
-            terminal: Arc::new(Mutex::new(TerminalBuffer::new(spec.encoding()))),
+            terminal: Arc::new(Mutex::new(if matches!(spec, SessionSpec::Local { .. }) {
+                TerminalBuffer::new_local(spec.encoding())
+            } else {
+                TerminalBuffer::new(spec.encoding())
+            })),
             spec,
             commands,
             cancel: CancellationToken::new(),

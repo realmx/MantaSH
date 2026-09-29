@@ -2099,15 +2099,7 @@ impl Workbench {
                             ),
                     );
                 }
-                // Keep the running version visible outside the scrolling settings body.
-                footer = footer.items_center().child(
-                    div().flex_1().text_color(p.muted).child(
-                        self.t("settings_version")
-                            .replace("{version}", crate::APP_VERSION),
-                    ),
-                );
-                footer = footer.child(self.check_update_button(cx));
-                footer = footer.child(
+                footer = footer.items_center().justify_between().child(
                     self.button("reset-settings", self.t("reset_defaults"))
                         .on_click(cx.listener(|this, _, w, cx| {
                             // Reset exactly the items this dialog shows:
@@ -2123,6 +2115,7 @@ impl Workbench {
                             this.apply_preferences(w, cx);
                         })),
                 );
+                footer = footer.child(self.check_update_button(cx));
             }
             Modal::Font { terminal, filter } => {
                 title = self
@@ -3780,6 +3773,7 @@ impl Workbench {
                 | Modal::Transfer { .. }
                 | Modal::CancelTransfers { .. }
                 | Modal::Update
+                | Modal::About
         ) {
             footer = footer.child(
                 self.button("dismiss-modal", close_label)

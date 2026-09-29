@@ -80,7 +80,7 @@ QA：`scripts/qa_transfers_macos.py --directory <目录> --fixture <fixture 目�
 输出唤醒、damage 复制与刷新调度见[终端机制](terminal-reference.md)。本地实现要点：
 
 - Unix 本地 PTY 使用单一非阻塞 I/O 循环：先排空当前宽度的输出，以 500ms 稳定窗口等待 Zoom 中间尺寸结束，最终排空并重新检查队列后才更新 PTY 与仿真器网格；Windows 保留 ConPTY 既有后台路径。提示符和右侧提示始终由 Shell 的真实 SIGWINCH 重绘负责，应用不向 emulator 注入合成滚屏或提示符移动序列。
-- `TerminalBuffer` 用 VTE 状态解析器跟踪标准 `clear` 输出的 `CSI 3 J`、光标归零和 `CSI 2 J`：alacritty 的 `2J` 会先把旧视口行移入 scrollback，因此在该组合的 `2J` 字节边界完成后再次清理历史；普通 `2J`、单独 `3J` 和有新文本隔开的控制序列不触发补清。主 ANSI parser 按块处理，跨 PTY read 的转义序列由跟踪器保留状态。
+- `TerminalBuffer` 用 VTE 状态解析器跟踪清屏边界。后台为本地会话创建 `new_local`：普通 `CSI 2 J` 在原位擦除视口，保留光标、背景和已有历史，不采用 alacritty `clear_viewport` 将当前画面移入历史的策略，避免 npm 开发服务器清屏后短输出也出现滚动条。真正换行溢出的历史仍可滚动；SSH 保留原有清屏行为。`CSI 3 J`、光标归零、`CSI 2 J` 的显式清历史组合继续处理，跨 PTY read 的转义序列由跟踪器保留状态。回归见 `tests/local_terminal_clear.rs`，覆盖短输出、分段清屏、已有历史、真实溢出、光标/背景及备用屏幕。
 - `resize_local` 只在本地、可信提示符未收到输入、光标在首行、原 history 为空且其余可见行全空时，清除本次 resize 刚产生的 history（未清屏 zsh RPROMPT 的 reflow 场景）；有真实 scrollback、编辑中的命令或下方输出时保持原网格语义。输入状态只保存两个布尔值，提交后的新提示符才复位。
 - `TerminalView` 只接受与测量尺寸相同的网格帧，并在每个布局帧清空 retained canvas，避免 AppKit 动画期间的旧字形残留。
 
@@ -98,7 +98,7 @@ QA：`scripts/qa_transfers_macos.py --directory <目录> --fixture <fixture 目�
 - macOS `install_system_menu` 显式注册本地化的 NSApplication.windowsMenu，并使用标准 performMiniaturize:/performZoom: responder action（锁定版 GPUI 只会自动注册字面名称为 Window 的菜单）。顶栏/快捷键经保留的 NSMenu 和所属 NSView 打开真正的系统菜单，在前台执行器中释放 GPUI 更新借用后进入 AppKit 菜单循环；系统负责平铺、居中、全屏与还原选项。
  - Windows 使用透明的 GPUI 组件标题栏，顶栏空白区域按 ashell 同类方式在拖动阈值后释放鼠标捕获并投递 `WM_SYSCOMMAND(SC_MOVE | HTCAPTION)`，避免 GPUI Windows 后端的 `start_window_move` 空实现。右侧最小化、最大化/还原、关闭按钮分别映射 `SC_MINIMIZE`、`SC_MAXIMIZE/SC_RESTORE`、`SC_CLOSE`，同时注册 `WindowControlArea::{Min,Max,Close}`；关闭仍经过应用已有的未保存变更确认。标签、控件和弹窗遮罩保持独立交互。Windows 验收需覆盖无重复 LOGO、三枚按钮、空白区拖动和双击最大化/还原。本地 Shell 选择持久化在 `Preferences.local_shell`，在 UI 线程外发现，且只作用于新建本地会话；不可用的选择明确报错，已有会话保留原 Shell。
 - `window_layout.rs`、尺寸表单和直接几何接口保留给其它平台与几何回归；macOS 日常菜单使用系统 WindowMenuProbe 和菜单只读快照。Windows 适配未实机验证，Linux 不新增本地 VM/容器。
-- 应用菜单以本地化的“关于 MantaSH / About MantaSH”为首项，接分隔线、“设置”、Services 和退出。`OpenAbout` 在释放 GPUI 更新借用后调用系统 UI：macOS 使用 `orderFrontStandardAboutPanelWithOptions:` 传入应用名和 `APP_VERSION`（已打包 `.app` 的图标来自 `Info.plist`）；Windows 使用绑定当前窗口 HWND 的 ShellAboutW。About 是系统标准面板，不进入 Workbench 的弹窗栈；设置页仍显示版本。`scripts/qa_about_menu_macos.py --binary target/debug/mantash --directory <全新隔离目录>` 在隔离原生窗口检查真实 AppKit 菜单、独立系统面板、版本文本和设置弹窗保持状态，不代替人工物理点击或 Windows 实机验证。
+- 应用菜单以本地化的“关于 MantaSH / About MantaSH”为首项，接分隔线、“设置”、Services 和退出。`OpenAbout` 派发 `ShowAboutModal` 打开应用内 `Modal::About`，正文显示应用名和 `APP_VERSION`；右上角关闭或 Esc 退出，footer 不提供“取消”。设置 footer 左侧为“恢复默认”、右侧为“检查更新”，不再显示版本号。
 
 ## 自动更新
 
