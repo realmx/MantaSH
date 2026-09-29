@@ -100,6 +100,14 @@ QA：`scripts/qa_transfers_macos.py --directory <目录> --fixture <fixture 目�
 - `window_layout.rs`、尺寸表单和直接几何接口保留给其它平台与几何回归；macOS 日常菜单使用系统 WindowMenuProbe 和菜单只读快照。Windows 适配未实机验证，Linux 不新增本地 VM/容器。
 - 应用菜单以本地化的“关于 MantaSH / About MantaSH”为首项，接分隔线、“设置”、Services 和退出。`OpenAbout` 在释放 GPUI 更新借用后调用系统 UI：macOS 使用 `orderFrontStandardAboutPanelWithOptions:` 传入应用名和 `APP_VERSION`（已打包 `.app` 的图标来自 `Info.plist`）；Windows 使用绑定当前窗口 HWND 的 ShellAboutW。About 是系统标准面板，不进入 Workbench 的弹窗栈；设置页仍显示版本。`scripts/qa_about_menu_macos.py --binary target/debug/mantash --directory <全新隔离目录>` 在隔离原生窗口检查真实 AppKit 菜单、独立系统面板、版本文本和设置弹窗保持状态，不代替人工物理点击或 Windows 实机验证。
 
+## 自动更新
+
+`update.rs` 负责固定官方源的版本检查、平台资源选择、流式下载、SHA-256 校验与平台安装助手。`ui/updates.rs` 维护检查、询问、下载、准备、关闭交接和失败状态；每次下载/准备结果须匹配本次请求 ID，取消使旧结果失效。文件及进程操作在后台执行，暂存包清理也不在 GPUI 主线程执行。
+
+设置 footer 的“检查更新”进入手动模式，显示检查中、无适用更新、发现新版本或失败；正在进行的自动请求可以被手动接管而不重复发起。手动请求不受本次已取消版本集合抑制；确认弹窗保存设置父页面，取消时先使请求 ID 失效再返回设置。`cargo test --locked --lib ui::updates::tests` 覆盖结果模式、重复请求、取消与迟到结果。
+
+`CloseTarget::Update` 复用草稿和传输的关闭保护；保存草稿时保留更新同意，取消则清除待更新关闭目标。工作区成功保存后才启动安装助手，助手等待应用退出后安装，启动助手本身不代表安装成功。原生 QA 可运行 `python3 scripts/qa_updates_macos.py --binary target/debug/mantash --directory <全新隔离目录>`，需要较旧的 debug 二进制和可访问 GitHub 的网络，仅检查提示、延后显示与取消，不确认下载或安装。完整测试边界见[自动更新](updates.md)。
+
 ## 共享命令历史
 
 `HistoryScope` 将 local 与 `ssh:<profile UUID>` 记录映射为本地与共享 SSH 两份逻辑列表，保留存储中的源 UUID，不改写已有记录。`ui/history.rs` 的 HistoryView 在 Workbench 中按范围持有搜索、滚动和多选选区，SSH 标签不各自持有。历史来源不决定执行位置：行操作捕获当前 Owner，直接执行再次验证 attempt 与可靠 Shell 提示符后，把命令粘贴并提交到该终端。弹窗排版与选择语义见[设计规范](design.md#共享-ssh-历史)。

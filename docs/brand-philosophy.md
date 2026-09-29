@@ -9,3 +9,11 @@
 文字沿用低声量的排布。字标与图形各自拥有空间，彼此通过基线和重量呼应；说明文字只提供识别所需的信息。整幅画面应像经过反复校准的器物，简洁、稳定，并允许视线自然流过。
 
 本项目将这一方向落实为“共享透镜”的抽象构成：一实一空两个圆在深底上交叠，中央共享一枚透镜——本地与远端、终端与文件面板，一次连接被看见。品牌图形不改变已确认的工作台布局与用户字体设置。
+
+## macOS 应用图标
+
+macOS 专用 PNG 与 ICNS 使用铺满画布的不透明深蓝底色，不预留透明外圈，也不预先裁圆角，由系统处理原生图标轮廓，避免透明留白露出系统浅色底板。双圆标志的几何、颜色与位置保持统一；Windows ICO、文档使用的 128px PNG 和界面 SVG 仍使用各自原有的表现形式。
+
+运行 `python3 scripts/generate_logo.py --macos-only` 只生成 `assets/mantash-macos-1024.png` 和 `assets/mantash.icns`；不带参数则生成完整品牌资源。macOS 打包继续通过 `CFBundleIconFile=mantash.icns` 引用 ICNS。多尺寸不透明边缘与生成一致性由 `python3 -m unittest discover -s tests -p test_logo_assets.py` 检查；最终进程列表效果须用新安装包重新启动应用验收，不能以 PNG 预览替代系统呈现。
+
+独立通用 PNG 只保留文档实际使用的 `assets/mantash-128.png`；其他尺寸由 ICO/ICNS 内置表示，不额外输出未被消费的单尺寸文件。

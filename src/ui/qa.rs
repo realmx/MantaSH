@@ -17,6 +17,11 @@ fn default_click_count() -> i64 {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
     Snapshot,
+    /// Read the official release endpoint now; never confirms or installs an update.
+    CheckUpdates {
+        #[serde(default)]
+        manual: bool,
+    },
     /// Send a bounded pointer gesture only to this isolated app's own native window.
     PointerGesture {
         points: Vec<[f32; 2]>,
@@ -574,6 +579,13 @@ impl Workbench {
         }
         match request.action {
             Action::Snapshot => {}
+            Action::CheckUpdates { manual } => {
+                if manual {
+                    self.manual_check_updates(window, cx);
+                } else {
+                    self.check_updates(window, cx);
+                }
+            }
             Action::PortsFixture {
                 ports,
                 error,
@@ -1946,6 +1958,7 @@ impl Workbench {
             })).collect::<Vec<_>>(),
             "tool_width": if self.active_tool().is_some() { Some(self.tool_width(window)) } else { None },
             "modal": modal,
+            "update": self.qa_update_status(),
             "modal_stack": modal_stack,
             "modal_navigation": modal_navigation,
             "modal_scroll_y": f32::from(self.modal_scroll.offset().y),

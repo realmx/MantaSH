@@ -2,7 +2,7 @@
 
 ## 版本来源
 
-`Cargo.toml` 是唯一源码版本入口，当前基准为 `1.1.5`；Rust 使用 `CARGO_PKG_VERSION` 显示版本。维护者按 SemVer 手工决定 major/minor 变更。版本 workflow 将最新可达的发布 tag 与本次 `master` 提交比较：仅文档与 README 截图变更不建 tag；其它变更按源码基线或补丁规则为该提交分配 `vX.Y.Z` tag，不向主分支提交自动版本变更。已发布版本以 tag 和 [GitHub Release](https://github.com/realmx/MantaSH/releases) 为准。SQLite 格式和连接 CSV 列独立维护。
+`Cargo.toml` 是唯一源码版本入口，当前基准为 `1.1.10`；Rust 使用 `CARGO_PKG_VERSION` 显示版本。维护者按 SemVer 手工决定 major/minor 变更。版本 workflow 将最新可达的发布 tag 与本次 `master` 提交比较：仅文档与 README 截图变更不建 tag；其它变更按源码基线或补丁规则为该提交分配 `vX.Y.Z` tag，不向主分支提交自动版本变更。已发布版本以 tag 和 [GitHub Release](https://github.com/realmx/MantaSH/releases) 为准。SQLite 格式和连接 CSV 列独立维护。
 
 Release runner 在编译前仅在本次检出的源码中把 `Cargo.toml`、`Cargo.lock` 和 `docs/dependency-licenses.csv` 同步为 tag 版本；这些改动不推回 `master`。
 
@@ -42,6 +42,10 @@ git push origin master
 macOS 应用使用 ad-hoc 签名，DMG 未经 Apple 公证，不要求或读取 Developer ID/公证 secrets；Windows 使用 [Inno Setup](../packaging/windows/MantaSH.iss) 打包，未做代码签名。工作流在 macOS runner 核对 DMG 校验和、架构、版本及签名；Windows runner 产出安装器；发布前要求五包及其校验文件全部存在并通过 SHA-256。任一目标失败，publish job 不执行。
 
 macOS Gatekeeper 可能阻止首次启动，Windows SmartScreen 可能提示确认。先核对下载来源及校验和，macOS 按[用户手册](user-guide.md#macos-无法直接打开)使用系统“仍要打开”，不使用 `xattr` 等方式关闭安全检查。Actions 构建通过不等于 Windows 实机安装或运行验收通过。
+
+## 应用内更新渠道
+
+应用内自动更新读取官方 GitHub `/repos/realmx/MantaSH/releases/latest`，以运行二进制的版本作 SemVer 比较，仅接受更高的稳定版本。资源文件名、平台/架构与同名 `.sha256` 是更新协议的一部分，不能只上传 tag 或更改文件名而省略校验文件。用户确认后才下载并校验原生安装包；发布失败、草稿或缺包不触发更新安装。更新流程、取消语义和分平台验收见[自动更新](updates.md)。
 
 ## Homebrew tap
 

@@ -78,6 +78,7 @@ class ReleaseVersionTests(unittest.TestCase):
         self.assertEqual(release_version.next_version("1.0.10", ["v1.0.7", "v1.0.10"]), "1.0.11")
         self.assertEqual(release_version.next_version("2.0.0", ["v1.0.10"]), "2.0.0")
         self.assertEqual(release_version.next_version("1.0.10", ["v2.0.0"]), "2.0.1")
+        self.assertEqual(release_version.next_version("1.1.10", ["v1.1.9"]), "1.1.10")
 
     def test_documentation_scope_excludes_release_metadata_and_code(self):
         docs = ["README.md", "README.en.md", "AGENTS.md", "THIRD_PARTY.md",
@@ -132,7 +133,8 @@ class ReleaseVersionTests(unittest.TestCase):
             self.assertIn("docs/moved.md", paths)
             self.assertTrue(release_version.release_relevant_changes("v1.0.0", source_change, repo))
             self.assertNotEqual(initial, source_change)
-    def test_documentation_push_skips_tag_until_release_relevant_change(self):
+    @patch.object(release_version, "source_version", return_value="1.1.5")
+    def test_documentation_push_skips_tag_until_release_relevant_change(self, _baseline):
         with TemporaryDirectory() as directory:
             output = Path(directory) / "result"
             calls = []
@@ -190,7 +192,8 @@ class ReleaseVersionTests(unittest.TestCase):
             self.assertEqual(output.read_text(), "version=1.1.1\ncreated=false\n")
             push.assert_not_called()
 
-    def test_new_push_tags_source_without_version_commit(self):
+    @patch.object(release_version, "source_version", return_value="1.1.5")
+    def test_new_push_tags_source_without_version_commit(self, _baseline):
         with TemporaryDirectory() as directory:
             output = Path(directory) / "result"
             calls = []
@@ -236,7 +239,8 @@ class ReleaseVersionTests(unittest.TestCase):
             self.assertEqual(output.read_text(), "version=1.1.1\ncreated=false\n")
             self.assertEqual(runner.call_count, 1)
 
-    def test_rewritten_master_keeps_version_above_unmerged_release_tag(self):
+    @patch.object(release_version, "source_version", return_value="1.1.5")
+    def test_rewritten_master_keeps_version_above_unmerged_release_tag(self, _baseline):
         with TemporaryDirectory() as directory:
             output = Path(directory) / "result"
             def git(*args):

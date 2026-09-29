@@ -30,8 +30,6 @@ NOTICE_FILES = [
     "THIRD_PARTY.md",
     "docs/dependency-licenses.csv",
     "assets/LUCIDE-LICENSE",
-    "assets/fonts/InstrumentSans-OFL.txt",
-    "assets/fonts/WorkSans-OFL.txt",
 ]
 
 

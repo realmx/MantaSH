@@ -109,4 +109,4 @@ macOS 使用 AppKit 标准「窗口」菜单，常用平铺、居中、填满、
 
 ![MantaSH](../assets/mantash-128.png)
 
-`scripts/generate_logo.py` 按同一 64 单位几何生成全部矢量、位图和 [品牌展示 PNG](../assets/logo-preview.png)／[PDF](../assets/logo-preview.pdf)，设计依据为 [折流](brand-philosophy.md)。展示板使用随项目提供的 Instrument Sans 和 Work Sans（OFL）；应用文字仍尊重用户选择的界面字体。使用 Python 3.10 或更新版本，复现命令为 `python3 -m pip install -r requirements-tools.txt` 后运行 `python3 scripts/generate_logo.py`。生成资源不代表已完成应用打包、签名或发布；实际窗口截图与输入法/平台待验项见 [原生验收](acceptance.md)。
+`scripts/generate_logo.py` 按同一 64 单位几何生成应用矢量、文档 PNG 和平台 ICO/ICNS，设计依据为 [折流](brand-philosophy.md)。生成过程不依赖字体文件；应用文字仍尊重用户选择的界面字体。使用 Python 3.10 或更新版本，复现命令为 `python3 -m pip install -r requirements-tools.txt` 后运行 `python3 scripts/generate_logo.py`。生成资源不代表已完成应用打包、签名或发布；实际窗口截图与输入法/平台待验项见 [原生验收](acceptance.md)。

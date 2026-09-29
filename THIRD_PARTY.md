@@ -19,6 +19,4 @@ MantaSH 自有代码、品牌与文档使用 GPL-3.0-or-later，完整文本见 
 
 Lucide 图标及其 Feather 来源的完整授权文本另存于 [assets/LUCIDE-LICENSE](assets/LUCIDE-LICENSE)，与组件库代码许可分别保留。
 
-LOGO 展示板使用 Instrument Sans（Copyright 2022 The Instrument Sans Project Authors）与 Work Sans（Copyright 2019 The Work Sans Project Authors）。字体及各自的 [Instrument Sans OFL](assets/fonts/InstrumentSans-OFL.txt)／[Work Sans OFL](assets/fonts/WorkSans-OFL.txt) 位于 assets/fonts，来源项目分别为 https://github.com/Instrument/instrument-sans 和 https://github.com/weiweihuanghuang/Work-Sans。它们仅用于可复现的品牌展示，不替换用户的系统界面或终端字体。
-
 品牌生成脚本使用 Pillow，版本在 requirements-tools.txt 中固定；项目来源为 https://github.com/python-pillow/Pillow，许可为 MIT-CMU。该工具不属于原生应用运行依赖。

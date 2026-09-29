@@ -60,6 +60,7 @@ mod system;
 mod tab_reorder;
 mod tools;
 mod transfer_paths;
+mod updates;
 mod window_actions;
 mod window_native;
 
@@ -338,6 +339,7 @@ pub struct Workbench {
     window_change: Option<Id>,
     local_shells: Option<Vec<String>>,
     local_shells_loading: bool,
+    updates: updates::Updates,
     root_focus: FocusHandle,
     notice: Option<String>,
     storage_warning: Option<String>,
@@ -437,6 +439,7 @@ impl Workbench {
             window_change: None,
             local_shells: None,
             local_shells_loading: false,
+            updates: updates::Updates::default(),
             root_focus: cx.focus_handle(),
             notice: titlebar_error,
             storage_warning: warning,
@@ -1263,6 +1266,7 @@ impl Workbench {
                 if let Some(event) = self.queued_credentials.remove(index) { self.event(event, window, cx); }
             }
         }
+        self.tick_updates(window, cx);
         // Resource detail and process/port dialogs stay open across samples; keep
         // sampling while they are visible so their data refreshes live.
         if self.active_tool() == Some(Tool::System)

@@ -3,6 +3,44 @@ use crate::model::Language;
 /// Translate every product action through a single bilingual catalog.
 pub fn text(language: Language, key: &str) -> &'static str {
     let pair = match key {
+        "check_updates" => ("检查更新", "Check for updates"),
+        "update_checking" => ("正在检查最新版本…", "Checking for the latest version…"),
+        "update_no_update" => (
+            "未发现适用于当前平台的新版本。当前版本：{current}。",
+            "No newer version is available for this platform. Current version: {current}.",
+        ),
+        "update_check_failed" => (
+            "检查更新失败。请检查网络连接后重试。",
+            "Could not check for updates. Check your network connection and try again.",
+        ),
+        "update_check_retry" => ("重新检查", "Check again"),
+        "update_title" => ("发现新版本", "Update available"),
+        "update_available" => (
+            "当前版本 {current}，最新版本 {version}。是否下载并安装更新？",
+            "Current version: {current}. Latest version: {version}. Download and install the update?",
+        ),
+        "update_confirm" => ("确定更新", "Update now"),
+        "update_retry" => ("重试更新", "Retry update"),
+        "update_restart_hint" => (
+            "更新将关闭当前会话并重启应用。未保存的文件会先询问；系统可能要求安装权限或安全确认。",
+            "Updating closes current sessions and restarts the app. Unsaved files are checked first. The system may request installation permission or security confirmation.",
+        ),
+        "update_downloading" => (
+            "正在下载更新：{received} / {total} MiB",
+            "Downloading update: {received} / {total} MiB",
+        ),
+        "update_preparing" => (
+            "正在校验并准备安装…",
+            "Verifying and preparing installation…",
+        ),
+        "update_installing" => (
+            "正在保存工作区并启动安装…",
+            "Saving the workspace and starting installation…",
+        ),
+        "update_failed" => (
+            "更新未完成，当前应用保持打开。可重试或取消。",
+            "The update did not complete. The current app remains open. Retry or cancel.",
+        ),
         "window_menu" => ("窗口", "Window"),
         "window_controls" => ("窗口操作", "Window controls"),
         "window_current" => ("当前", "Current"),

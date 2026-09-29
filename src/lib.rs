@@ -27,6 +27,7 @@ pub mod terminal_paint;
 pub mod titles;
 #[cfg(feature = "desktop")]
 pub mod ui;
+pub mod update;
 pub mod window_layout;
 
 pub mod processes;

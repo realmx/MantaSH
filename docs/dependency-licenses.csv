@@ -367,7 +367,7 @@ lyon_path,1.0.19,MIT OR Apache-2.0,,https://github.com/nical/lyon,registry+https
 lyon_tessellation,1.0.22,MIT OR Apache-2.0,,https://github.com/nical/lyon,registry+https://github.com/rust-lang/crates.io-index
 mac,0.1.1,MIT/Apache-2.0,,https://github.com/reem/rust-mac.git,registry+https://github.com/rust-lang/crates.io-index
 malloc_buf,0.0.6,MIT,,https://github.com/SSheldon/malloc_buf,registry+https://github.com/rust-lang/crates.io-index
-mantash,1.1.5,GPL-3.0-or-later,,,MantaSH workspace
+mantash,1.1.10,GPL-3.0-or-later,,https://github.com/realmx/mantash,MantaSH workspace
 markdown,1.0.0,MIT,,https://github.com/wooorm/markdown-rs,registry+https://github.com/rust-lang/crates.io-index
 markup5ever,0.12.1,MIT OR Apache-2.0,,https://github.com/servo/html5ever,registry+https://github.com/rust-lang/crates.io-index
 markup5ever_rcdom,0.3.0,MIT OR Apache-2.0,,https://github.com/servo/html5ever,registry+https://github.com/rust-lang/crates.io-index
@@ -527,6 +527,7 @@ ref-cast-impl,1.0.27,MIT OR Apache-2.0,,https://github.com/dtolnay/ref-cast,regi
 regex,1.13.1,MIT OR Apache-2.0,,https://github.com/rust-lang/regex,registry+https://github.com/rust-lang/crates.io-index
 regex-automata,0.4.18,MIT OR Apache-2.0,,https://github.com/rust-lang/regex,registry+https://github.com/rust-lang/crates.io-index
 regex-syntax,0.8.11,MIT OR Apache-2.0,,https://github.com/rust-lang/regex,registry+https://github.com/rust-lang/crates.io-index
+reqwest,0.12.28,MIT OR Apache-2.0,,https://github.com/seanmonstar/reqwest,registry+https://github.com/rust-lang/crates.io-index
 resvg,0.45.1,Apache-2.0 OR MIT,,https://github.com/linebender/resvg,registry+https://github.com/rust-lang/crates.io-index
 rfc6979,0.6.0,Apache-2.0 OR MIT,,https://github.com/RustCrypto/signatures,registry+https://github.com/rust-lang/crates.io-index
 rfd,0.17.2,MIT,,https://github.com/PolyMeilex/rfd,registry+https://github.com/rust-lang/crates.io-index
@@ -695,6 +696,7 @@ toml_parser,1.1.3+spec-1.1.0,MIT OR Apache-2.0,,https://github.com/toml-rs/toml,
 toml_write,0.1.2,MIT OR Apache-2.0,,https://github.com/toml-rs/toml,registry+https://github.com/rust-lang/crates.io-index
 toml_writer,1.1.2+spec-1.1.0,MIT OR Apache-2.0,,https://github.com/toml-rs/toml,registry+https://github.com/rust-lang/crates.io-index
 tower,0.5.3,MIT,,https://github.com/tower-rs/tower,registry+https://github.com/rust-lang/crates.io-index
+tower-http,0.6.11,MIT,,https://github.com/tower-rs/tower-http,registry+https://github.com/rust-lang/crates.io-index
 tower-layer,0.3.3,MIT,,https://github.com/tower-rs/tower,registry+https://github.com/rust-lang/crates.io-index
 tower-service,0.3.3,MIT,,https://github.com/tower-rs/tower,registry+https://github.com/rust-lang/crates.io-index
 tracing,0.1.44,MIT,,https://github.com/tokio-rs/tracing,registry+https://github.com/rust-lang/crates.io-index
@@ -763,6 +765,7 @@ wayland-scanner,0.31.11,MIT,,https://github.com/smithay/wayland-rs,registry+http
 wayland-sys,0.31.11,MIT,,https://github.com/smithay/wayland-rs,registry+https://github.com/rust-lang/crates.io-index
 web-sys,0.3.105,MIT OR Apache-2.0,,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys,registry+https://github.com/rust-lang/crates.io-index
 web-time,1.1.0,MIT OR Apache-2.0,,https://github.com/daxpedda/web-time,registry+https://github.com/rust-lang/crates.io-index
+webpki-roots,1.0.9,CDLA-Permissive-2.0,,https://github.com/rustls/webpki-roots,registry+https://github.com/rust-lang/crates.io-index
 weezl,0.1.12,MIT OR Apache-2.0,,https://github.com/image-rs/weezl,registry+https://github.com/rust-lang/crates.io-index
 which,6.0.3,MIT,,https://github.com/harryfei/which-rs.git,registry+https://github.com/rust-lang/crates.io-index
 winapi,0.3.9,MIT/Apache-2.0,,https://github.com/retep998/winapi-rs,registry+https://github.com/rust-lang/crates.io-index

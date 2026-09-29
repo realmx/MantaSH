@@ -45,6 +45,8 @@ impl ProfileForm {
 #[derive(Clone)]
 pub(super) enum CloseTarget {
     Window,
+    /// Install a verified update after the same draft/transfer checks as a window close.
+    Update,
     Tab(Id),
     Pane(Owner),
     Document(Owner, Id),
@@ -89,6 +91,7 @@ pub(super) enum Modal {
         replace: bool,
     },
     About,
+    Update,
     Trust {
         owner: Owner,
         host: String,
@@ -196,6 +199,7 @@ impl Modal {
                 | Modal::Import { .. }
                 | Modal::DeleteFiles { .. }
                 | Modal::Close(_)
+                | Modal::Update
                 | Modal::Conflict { .. }
                 | Modal::Transfer { .. }
                 | Modal::CancelTransfers { .. }
@@ -217,6 +221,7 @@ impl Modal {
             Modal::DeleteProfiles { .. } => "delete_profiles",
             Modal::Import { .. } => "import",
             Modal::About => "about",
+            Modal::Update => "update",
             Modal::Trust { .. } => "trust",
             Modal::FileName { .. } => "file_name",
             Modal::DeleteFiles { .. } => "delete_files",
@@ -307,10 +312,23 @@ impl Workbench {
     fn same_modal_instance(current: &Modal, next: &Modal) -> bool {
         matches!((current, next),
             (Modal::Editor { owner: left }, Modal::Editor { owner: right }) if left == right
-        ) || matches!((current, next), (Modal::Settings, Modal::Settings))
+        ) || matches!(
+            (current, next),
+            (Modal::Settings, Modal::Settings) | (Modal::Update, Modal::Update)
+        )
     }
 
     pub(super) fn show_modal(&mut self, modal: Modal, window: &mut Window, cx: &mut Context<Self>) {
+        if self.update_handoff_active() {
+            return;
+        }
+        if matches!(
+            self.modal,
+            Some(Modal::Update | Modal::Close(CloseTarget::Update))
+        ) && !matches!(modal, Modal::Update | Modal::Close(CloseTarget::Update))
+        {
+            self.cancel_update();
+        }
         self.compact_sidebar_open = false;
         if matches!(&modal, Modal::LocalHistory) {
             self.notice = None;
@@ -355,8 +373,12 @@ impl Workbench {
                 let process_parent = matches!((&current, &modal),
                     (Modal::ProcessDetails { owner: left, process, .. }, Modal::ProcessConfirm { owner: right, process: target, .. })
                     if left == right && process.identity == target.identity);
-                let captures_parent =
-                    connection_parent || history_parent || editor_parent || process_parent;
+                let update_parent = matches!((&current, &modal), (Modal::Settings, Modal::Update));
+                let captures_parent = connection_parent
+                    || history_parent
+                    || editor_parent
+                    || process_parent
+                    || update_parent;
                 if captures_parent {
                     let owner = match &current {
                         Modal::Editor { owner } => Some(*owner),
@@ -494,6 +516,15 @@ impl Workbench {
     }
 
     pub(super) fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.update_handoff_active() {
+            return;
+        }
+        if matches!(
+            self.modal,
+            Some(Modal::Update | Modal::Close(CloseTarget::Update))
+        ) {
+            self.cancel_update();
+        }
         let Some(current) = self.modal.take() else {
             return;
         };
@@ -530,7 +561,7 @@ impl Workbench {
                 .pane(*owner)
                 .is_some_and(|pane| !pane.documents.is_empty()),
             Modal::Close(CloseTarget::Editor(_)) => self.editor_return.is_some(),
-            Modal::ProcessConfirm { .. } => true,
+            Modal::ProcessConfirm { .. } | Modal::Update => true,
             _ => false,
         };
         if restore_editor && self.restore_confirmation_parent(window, cx) {
@@ -584,6 +615,16 @@ impl Workbench {
 
     /// Cancel a management step back to its library; authentication keeps its own cancellation.
     pub(super) fn cancel_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.update_handoff_active() {
+            return;
+        }
+        if matches!(
+            self.modal,
+            Some(Modal::Update | Modal::Close(CloseTarget::Update))
+        ) {
+            // Cancel the request before restoring Settings, so late results cannot reopen it.
+            self.cancel_update();
+        }
         // Closing the editor with unsaved drafts asks save-or-revert first;
         // clean documents close without interruption.
         if let Some(Modal::Editor { owner }) = &self.modal {
@@ -1168,6 +1209,9 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.update_handoff_active() {
+            return;
+        }
         let owners = self.close_owners(&target);
         let dirty = self
             .tabs
@@ -1198,7 +1242,7 @@ impl Workbench {
     }
     pub(super) fn close_owners(&self, target: &CloseTarget) -> Vec<Owner> {
         match target {
-            CloseTarget::Window => self
+            CloseTarget::Window | CloseTarget::Update => self
                 .tabs
                 .iter()
                 .flat_map(|t| &t.panes)
@@ -1229,7 +1273,15 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.update_handoff_active() {
+            return;
+        }
+        if matches!(target, CloseTarget::Update) {
+            self.finish_update(window, cx);
+            return;
+        }
         if matches!(target, CloseTarget::Window) {
+            self.cancel_update();
             self.preferences_dirty = None;
             let task = self
                 .backend
@@ -1362,7 +1414,12 @@ impl Workbench {
         if matches!(target, CloseTarget::Editor(_)) {
             self.editor_return = None;
         }
-        self.dismiss(window, cx);
+        if matches!(target, CloseTarget::Update) {
+            // Keep update consent while document saves are in flight. Dismiss means cancel.
+            self.show_modal(Modal::Update, window, cx);
+        } else {
+            self.dismiss(window, cx);
+        }
     }
     pub(super) fn import_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
@@ -1615,6 +1672,11 @@ impl Workbench {
         // Encoding pickers act directly on chips and do not need a footer strip.
         let mut footer_hidden = false;
         match modal {
+            Modal::Update => {
+                title = self.update_dialog_title().into();
+                body = body.child(self.render_update_body());
+                footer = footer.child(self.render_update_footer(cx));
+            }
             Modal::About => {
                 title = self.t("about_mantash").into();
                 body = body
@@ -2044,6 +2106,7 @@ impl Workbench {
                             .replace("{version}", crate::APP_VERSION),
                     ),
                 );
+                footer = footer.child(self.check_update_button(cx));
                 footer = footer.child(
                     self.button("reset-settings", self.t("reset_defaults"))
                         .on_click(cx.listener(|this, _, w, cx| {
@@ -3716,6 +3779,7 @@ impl Workbench {
                 | Modal::Transfers { .. }
                 | Modal::Transfer { .. }
                 | Modal::CancelTransfers { .. }
+                | Modal::Update
         ) {
             footer = footer.child(
                 self.button("dismiss-modal", close_label)

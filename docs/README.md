@@ -7,6 +7,7 @@
 - [项目主页与安装](../README.md) / [English README](../README.en.md)：定位版本、包与 Homebrew 安装命令。
 - [功能与范围](features.md)：支持的平台、能力和不包含的功能。
 - [用户手册](user-guide.md)：连接、终端、文件、编辑、传输、历史、监控与快捷键。
+- [自动更新](updates.md)：版本检查、确认/取消、下载校验、安装与分阶段验收。
 - [排障](troubleshooting.md)：连接、凭据、文件、数据、平台问题的排查。
 - [macOS](macos.md) / [Windows](windows.md)：平台调试与人工验证边界。
 
@@ -25,7 +26,7 @@
 
 - [交付状态](delivery-status.md) / [验收记录](acceptance.md)：区分代码接入、构建和实机证据。
 - [更新日志](../CHANGELOG.md)：已发布版本摘要。
-- [品牌设计](brand-philosophy.md) / [LOGO 展示](../assets/logo-preview.png)：标识依据和资源。
+- [品牌设计](brand-philosophy.md)：标识依据和图标生成约定。
 - [依赖许可清单](dependency-licenses.csv) / [第三方声明](../THIRD_PARTY.md) / [项目许可证](../LICENSE)：授权来源与分发义务。
 
 文档描述当前实现；修改用户行为、数据、快捷键、平台行为或产物时同步维护相应页面，不把自动化构建冒充平台实机验收。
