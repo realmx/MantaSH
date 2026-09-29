@@ -487,7 +487,14 @@ impl Workbench {
         for saved in snapshot.workspace.tabs {
             let mut panes = Vec::new();
             for entry in saved.panes {
-                let mut pane = this.create_pane_with_id(entry.spec, true, entry.id, window, cx);
+                let mut spec = entry.spec;
+                if let SessionSpec::Local {
+                    shell, directory, ..
+                } = &mut spec
+                {
+                    *directory = crate::platform::normalize_local_directory(directory, shell);
+                }
+                let mut pane = this.create_pane_with_id(spec, true, entry.id, window, cx);
                 // Panels stay closed until the session actually connects; the
                 // editor now lives in a dialog, so a legacy saved "editor"
                 // tool falls back to the system monitor page.
@@ -1497,6 +1504,15 @@ impl Workbench {
                 }
             }
             Event::Directory(owner, directory) => {
+                let directory = self
+                    .pane(owner)
+                    .and_then(|pane| match &pane.spec {
+                        SessionSpec::Local { shell, .. } => Some(
+                            crate::platform::normalize_local_directory(&directory, shell),
+                        ),
+                        SessionSpec::Ssh { .. } => None,
+                    })
+                    .unwrap_or(directory);
                 let changed = self.pane_mut(owner).is_some_and(|pane| {
                     let changed = pane.directory != directory;
                     pane.directory = directory.clone();

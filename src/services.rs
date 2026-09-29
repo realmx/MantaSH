@@ -249,6 +249,7 @@ impl Backend {
         else {
             bail!("Expected local session");
         };
+        let directory = crate::platform::normalize_local_directory(directory, shell);
         let executable = crate::platform::find_executable(shell)
             .ok_or_else(|| anyhow::anyhow!("Configured local shell is unavailable: {shell}"))?;
         let persistent_hook_directory = self.data_directory.join("shell-integration");
@@ -307,7 +308,7 @@ impl Backend {
                 command.arg("-i");
             }
         }
-        let directory = files::expand_home(directory);
+        let directory = files::expand_home(&directory);
         if !directory.is_dir() {
             bail!("Starting directory is unavailable: {}", directory.display());
         }

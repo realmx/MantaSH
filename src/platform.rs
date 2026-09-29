@@ -101,3 +101,27 @@ pub fn data_directory() -> Result<PathBuf> {
 pub fn data_override() -> Option<std::ffi::OsString> {
     std::env::var_os("MANTASH_DATA_DIR")
 }
+
+/// Normalize a local terminal directory before it is persisted or passed to a Windows PTY.
+/// Git Bash reports MSYS paths such as `/c/Users/name`; Windows-native shells do not.
+pub fn normalize_local_directory(directory: &str, shell: &str) -> String {
+    #[cfg(windows)]
+    {
+        let basename = Path::new(shell)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_ascii_lowercase();
+        let bytes = directory.as_bytes();
+        if (basename == "bash" || basename == "git-bash")
+            && bytes.len() >= 3
+            && bytes[0] == b'/'
+            && bytes[2] == b'/'
+            && bytes[1].is_ascii_alphabetic()
+        {
+            let drive = (bytes[1] as char).to_ascii_uppercase();
+            return format!("{drive}:\\{}", &directory[3..].replace('/', "\\"));
+        }
+    }
+    directory.to_string()
+}
