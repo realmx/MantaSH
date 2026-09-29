@@ -9,7 +9,7 @@
 
 数据库为 `mantash.sqlite3`，使用 SQLite WAL；运行期间可能存在 `-wal`、`-shm` 文件，检查或备份前先退出应用。Unix 数据目录权限为 0700。`MANTASH_DATA_DIR` 可指定隔离目录供调试和验收，正常使用无需设置；应用不扫描用户 Shell 历史文件。
 
-`Cargo.toml` 的源码基准版本当前是 `1.1.0`，发布包版本以 tag 为准。应用版本、SQLite `user_version` 与连接 CSV 格式彼此独立。
+`Cargo.toml` 的源码基准版本当前是 `1.1.5`，发布包版本以 tag 为准。应用版本、SQLite `user_version` 与连接 CSV 格式彼此独立。
 
 ## SQLite、工作区与恢复
 

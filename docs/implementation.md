@@ -42,4 +42,4 @@ Sent 表示信号发送成功，随后由有效采样确认原实例消失。期
 
 macOS 自动化和回环 SSH/SFTP 不能代替 Linux 系统数据、Windows ConPTY/DPI、输入法及实际鼠标验证。Windows 使用同一锁文件和 `scripts/check-windows.ps1`，结果由用户实机反馈；Windows 实机验收未完成，不能把 GitHub Actions 构建通过写成实机通过。Linux 进程集成只对专门创建的测试进程操作，不新增本地 VM/容器。
 
-项目默认分支为 `master`，源码基准版本 1.0.0，唯一版本入口是 `Cargo.toml`。清理不涉及系统 SSH 密钥、用户数据或凭据库，不自动配置远程或推送。
+项目默认分支为 `master`，源码基准版本 1.1.5，唯一版本入口是 `Cargo.toml`。清理不涉及系统 SSH 密钥、用户数据或凭据库，不自动配置远程或推送。

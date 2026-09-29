@@ -2217,25 +2217,54 @@ impl Workbench {
             }
             Modal::Import { preview, replace } => {
                 title = self.t("import_preview").into();
-                let new = preview
-                    .rows
-                    .iter()
-                    .filter(|r| r.profile.is_some() && r.duplicate.is_none())
-                    .count();
-                let duplicates = preview
-                    .rows
-                    .iter()
-                    .filter(|r| r.duplicate.is_some())
-                    .count();
-                let errors = preview.rows.iter().filter(|r| r.error.is_some()).count();
-                body = body
-                    .child(format!(
-                        "{} {new} · {} {duplicates} · {} {errors}",
-                        self.t("new_records"),
-                        self.t("duplicates"),
-                        self.t("errors")
-                    ))
-                    .child(self.t("import_hint"))
+                body = body.child(
+                    div()
+                        .id("import-rows")
+                        .relative()
+                        .max_h(px(280.))
+                        .overflow_y_scroll()
+                        .track_scroll(&self.modal_scroll)
+                        .children(preview.rows.iter().map(|row| {
+                            let row_number = row.row;
+                            let text = row.error.clone().unwrap_or_else(|| {
+                                row.profile
+                                    .as_ref()
+                                    .map(|p| format!("{} — {}", p.name, p.endpoint()))
+                                    .unwrap_or_default()
+                            });
+                            div()
+                                .flex()
+                                .gap(px(8.))
+                                .min_w_0()
+                                .py(px(4.))
+                                .border_b_1()
+                                .border_color(p.border)
+                                .text_color(if row.error.is_some() { p.error } else { p.text })
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(format!("{} · {}", row_number, text)),
+                                )
+                                .child(
+                                    self.button(("remove-import-row", row_number), "")
+                                        .icon(IconName::Close)
+                                        .ghost()
+                                        .h(px(20.))
+                                        .tooltip(self.t("remove_import_row"))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            if let Some(Modal::Import { preview, .. }) =
+                                                &mut this.modal
+                                            {
+                                                preview.rows.retain(|row| row.row != row_number);
+                                            }
+                                            cx.notify();
+                                        })),
+                                )
+                        }))
+                        .vertical_scrollbar(&self.modal_scroll),
+                );
+                footer = footer
                     .child(
                         Checkbox::new("replace-duplicates")
                             .label(self.t("replace_duplicates"))
@@ -2248,64 +2277,44 @@ impl Workbench {
                             })),
                     )
                     .child(
-                        div()
-                            .id("import-rows")
-                            .max_h(px(280.))
-                            .overflow_y_scroll()
-                            .children(preview.rows.iter().map(|row| {
-                                div()
-                                    .py(px(4.))
-                                    .text_color(if row.error.is_some() { p.error } else { p.text })
-                                    .child(format!(
-                                        "{} · {}",
-                                        row.row,
-                                        row.error.clone().unwrap_or_else(|| row
-                                            .profile
-                                            .as_ref()
-                                            .map(|p| format!("{} — {}", p.name, p.endpoint()))
-                                            .unwrap_or_default())
-                                    ))
+                        self.button("confirm-import", self.t("import"))
+                            .primary()
+                            .on_click(cx.listener(|this, _, w, cx| {
+                                if let Some(Modal::Import { preview, replace }) = &this.modal {
+                                    this.profiles =
+                                        connections::merge(&this.profiles, preview, *replace);
+                                    this.backend.save_profiles(this.profiles.clone());
+                                    // Passwords from the file go into the vault for rows that
+                                    // actually landed; skipped duplicates keep their saved value.
+                                    let imported: Vec<(Id, String)> = preview
+                                        .rows
+                                        .iter()
+                                        .filter(|row| row.duplicate.is_none() || *replace)
+                                        .filter_map(|row| {
+                                            let password = row.password.clone()?;
+                                            let profile = row.profile.as_ref()?;
+                                            let id = this
+                                                .profiles
+                                                .iter()
+                                                .find(|saved| saved.duplicates(profile))?
+                                                .id;
+                                            Some((id, password))
+                                        })
+                                        .collect();
+                                    if !imported.is_empty() {
+                                        let vault = this.backend.vault.clone();
+                                        this.backend.runtime.spawn_blocking(move || {
+                                            for (id, secret) in &imported {
+                                                let _ = crate::credentials::SecretStore::write(
+                                                    &*vault, *id, secret,
+                                                );
+                                            }
+                                        });
+                                    }
+                                }
+                                this.dismiss(w, cx);
                             })),
                     );
-                footer = footer.child(
-                    self.button("confirm-import", self.t("import"))
-                        .primary()
-                        .on_click(cx.listener(|this, _, w, cx| {
-                            if let Some(Modal::Import { preview, replace }) = &this.modal {
-                                this.profiles =
-                                    connections::merge(&this.profiles, preview, *replace);
-                                this.backend.save_profiles(this.profiles.clone());
-                                // Passwords from the file go into the vault for rows that
-                                // actually landed; skipped duplicates keep their saved value.
-                                let imported: Vec<(Id, String)> = preview
-                                    .rows
-                                    .iter()
-                                    .filter(|row| row.duplicate.is_none() || *replace)
-                                    .filter_map(|row| {
-                                        let password = row.password.clone()?;
-                                        let profile = row.profile.as_ref()?;
-                                        let id = this
-                                            .profiles
-                                            .iter()
-                                            .find(|saved| saved.duplicates(profile))?
-                                            .id;
-                                        Some((id, password))
-                                    })
-                                    .collect();
-                                if !imported.is_empty() {
-                                    let vault = this.backend.vault.clone();
-                                    this.backend.runtime.spawn_blocking(move || {
-                                        for (id, secret) in &imported {
-                                            let _ = crate::credentials::SecretStore::write(
-                                                &*vault, *id, secret,
-                                            );
-                                        }
-                                    });
-                                }
-                            }
-                            this.dismiss(w, cx);
-                        })),
-                );
             }
             Modal::FileName {
                 owner,

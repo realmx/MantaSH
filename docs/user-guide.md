@@ -9,7 +9,7 @@ brew install realmx/taps/mantash --cask
 brew upgrade --cask mantash
 ```
 
-源码基准版本为 `1.1.0`；发布版本以 tag 和 Release 页为准，设置弹窗 footer 左侧以“版本x.x.x”（例如“版本1.1.0”）显示当前运行版本。macOS 包采用 ad-hoc 签名、未经 Apple 公证；Windows 安装器未签名，可能触发 SmartScreen。Windows 的运行和安装体验尚未实机验收。
+源码基准版本为 `1.1.5`；发布版本以 tag 和 Release 页为准，设置弹窗 footer 左侧以“版本x.x.x”（例如“版本1.1.5”）显示当前运行版本。macOS 包采用 ad-hoc 签名、未经 Apple 公证；Windows 安装器未签名，可能触发 SmartScreen。Windows 的运行和安装体验尚未实机验收。
 
 ### macOS 无法直接打开
 

@@ -476,6 +476,7 @@ pub fn text(language: Language, key: &str) -> &'static str {
             "默认跳过重复连接；错误记录不会导入。",
             "Duplicates are skipped by default. Invalid rows are not imported.",
         ),
+        "remove_import_row" => ("移除该记录", "Remove row"),
         "close_impact" => (
             "关闭将结束以下会话，并中断相关传输。",
             "Closing ends these sessions and interrupts their transfers.",

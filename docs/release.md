@@ -2,7 +2,7 @@
 
 ## 版本来源
 
-`Cargo.toml` 是唯一源码版本入口，当前基准为 `1.1.0`；Rust 使用 `CARGO_PKG_VERSION` 显示版本。维护者按 SemVer 手工决定 major/minor 变更。版本 workflow 将最新可达的发布 tag 与本次 `master` 提交比较：仅文档与 README 截图变更不建 tag；其它变更按源码基线或补丁规则为该提交分配 `vX.Y.Z` tag，不向主分支提交自动版本变更。已发布版本以 tag 和 [GitHub Release](https://github.com/realmx/MantaSH/releases) 为准。SQLite 格式和连接 CSV 列独立维护。
+`Cargo.toml` 是唯一源码版本入口，当前基准为 `1.1.5`；Rust 使用 `CARGO_PKG_VERSION` 显示版本。维护者按 SemVer 手工决定 major/minor 变更。版本 workflow 将最新可达的发布 tag 与本次 `master` 提交比较：仅文档与 README 截图变更不建 tag；其它变更按源码基线或补丁规则为该提交分配 `vX.Y.Z` tag，不向主分支提交自动版本变更。已发布版本以 tag 和 [GitHub Release](https://github.com/realmx/MantaSH/releases) 为准。SQLite 格式和连接 CSV 列独立维护。
 
 Release runner 在编译前仅在本次检出的源码中把 `Cargo.toml`、`Cargo.lock` 和 `docs/dependency-licenses.csv` 同步为 tag 版本；这些改动不推回 `master`。
 

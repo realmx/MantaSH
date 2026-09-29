@@ -5,7 +5,7 @@
 ## 身份与版本
 
 - 用户可见品牌统一为 **MantaSH**；`mantash` 只用于程序包名、可执行文件、路径和技术标识，`MANTASH_*` 只用于环境变量。
-- 源码基准版本为 `1.1.0`，唯一源码版本入口是 `Cargo.toml`，major/minor 由维护者手工递增。Rust 代码使用 `CARGO_PKG_VERSION`；发布构建在 runner 上临时同步为 tag 版本，主分支不产生自动版本提交，已发布版本以 tag 和 Release 页为准。SQLite 格式和连接 CSV 格式独立维护。
+- 源码基准版本为 `1.1.5`，唯一源码版本入口是 `Cargo.toml`，major/minor 由维护者手工递增。Rust 代码使用 `CARGO_PKG_VERSION`；发布构建在 runner 上临时同步为 tag 版本，主分支不产生自动版本提交，已发布版本以 tag 和 Release 页为准。SQLite 格式和连接 CSV 格式独立维护。
 - 默认分支为 `master`，提交正文必须说明实际修改。`master` 更新仅涉及根目录 Markdown、`docs/**/*.md` 或 `assets/screenshots/` 中的 README 图片时，不创建新版本；否则 `scripts/release_version.py` 对比上个可达的发布 tag 与当前提交，为本次源码提交创建一个 `vX.Y.Z` tag，不产生自动版本提交。`docs/dependency-licenses.csv`、发布脚本及 workflow 的改动不属于纯文档更新。
 - 新 tag 由版本 workflow 显式派发 `release.yml`（`GITHUB_TOKEN` 创建的 tag 不依赖 tag push 自动触发）。外部 `v*` tag push 也可发布；`build/**` push 和带平台选择的手动分支构建只上传以 `<基准版本>-dev.<短SHA>` 命名、保留 14 天的 Actions artifacts。
 
