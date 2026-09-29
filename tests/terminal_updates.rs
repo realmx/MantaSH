@@ -282,6 +282,14 @@ fn actual_pty_output_wakes_without_periodic_ui_polling() {
         }
     }
     assert!(connected, "PTY did not connect before the deadline");
+    // Startup shells may emit a prompt before the test command. Consume that
+    // initial notification so this assertion measures the command's wakeup.
+    while events.try_recv().is_ok() {}
+    {
+        let mut term = session.terminal.lock();
+        term.take_frame_update(true);
+        session.output_wakeup.acknowledge();
+    }
     session.input(b"printf 'WAKE_%s\\n' COMPLETE\r".to_vec());
     let mut wakeups = 0;
     let mut complete = false;
