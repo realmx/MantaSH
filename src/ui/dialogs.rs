@@ -1676,6 +1676,7 @@ impl Workbench {
                 footer = footer.child(self.render_update_footer(cx));
             }
             Modal::About => {
+                footer_hidden = true;
                 title = self.t("about_mantash").into();
                 body = body
                     .items_center()
