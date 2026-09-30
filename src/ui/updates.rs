@@ -411,9 +411,9 @@ impl Workbench {
                 self.t("update_downloading")
                     .replace(
                         "{received}",
-                        &format!("{:.1}", received as f64 / 1_048_576.),
+                        &format!("{:.1}", received as f64 / 1_000_000.),
                     )
-                    .replace("{total}", &format!("{:.1}", total as f64 / 1_048_576.))
+                    .replace("{total}", &format!("{:.1}", total as f64 / 1_000_000.))
             }
             Phase::Preparing => self.t("update_preparing").to_string(),
             Phase::Ready | Phase::Closing => self.t("update_installing").to_string(),

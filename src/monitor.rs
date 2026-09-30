@@ -379,7 +379,7 @@ pub fn parse(output: &str, previous: Option<&Sample>, timestamp: i64) -> Sample 
     sample
 }
 
-/// Display binary byte units consistently across files and system tools.
+/// Display decimal byte units consistently across files and system tools.
 pub fn bytes(value: u64) -> String {
     let mut n = value as f64;
     let mut unit = 0;

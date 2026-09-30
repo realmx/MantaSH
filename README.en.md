@@ -30,7 +30,7 @@ Alternatively, download the package for your architecture from [GitHub Releases]
 
 - Local PTY terminals, tabs and Shell history; each local tab supports up to five mixed split panes. SSH tabs cannot be split.
 - SSH password authentication and host-fingerprint verification. Passwords are sent only after host approval and encrypted locally with AES-256-GCM after successful authentication, without a master password or system Keychain.
-- SFTP browsing and transfers, remote text editing (regular text up to 8 MiB; last-write-wins saves), and shared history across SSH tabs.
+- SFTP browsing and transfers, remote text editing (regular text up to 8 MB; last-write-wins saves), and shared history across SSH tabs.
 - Resource, process and port monitoring for Linux hosts; Chinese and English, themes, fonts and workspace restoration.
 
 Key-based SSH authentication, servers offering only RSA host keys and directory upload through the picker are not supported. See [features and scope](docs/features.md) for other boundaries.

@@ -14,7 +14,7 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
-pub const EDIT_LIMIT: u64 = 8 * 1024 * 1024;
+pub const EDIT_LIMIT: u64 = 8_000_000;
 #[derive(Debug, Clone)]
 pub struct FileEntry {
     pub name: String,
@@ -154,7 +154,7 @@ async fn read_bounded(sftp: &SftpSession, path: &str) -> Result<(Vec<u8>, Stamp)
         bail!("Only regular text files can be edited");
     }
     if metadata.size.is_some_and(|n| n > EDIT_LIMIT) {
-        bail!("Text editor limit is 8 MiB; download this file instead");
+        bail!("Text editor limit is 8 MB; download this file instead");
     }
     let mut bytes = Vec::new();
     sftp.open(path)
@@ -163,7 +163,7 @@ async fn read_bounded(sftp: &SftpSession, path: &str) -> Result<(Vec<u8>, Stamp)
         .read_to_end(&mut bytes)
         .await?;
     if bytes.len() as u64 > EDIT_LIMIT {
-        bail!("File grew beyond the 8 MiB editor limit");
+        bail!("File grew beyond the 8 MB editor limit");
     }
     let stamp = Stamp {
         hash: Sha256::digest(&bytes).into(),
@@ -250,7 +250,7 @@ pub async fn save(
 ) -> Result<SaveResult> {
     let bytes = encoding::encode(text, encoding, document.bom)?;
     if bytes.len() as u64 > EDIT_LIMIT {
-        bail!("Encoded file exceeds 8 MiB");
+        bail!("Encoded file exceeds 8 MB");
     }
     let sftp = remote.sftp().await?;
     // Validate that the target is still a readable regular file, but do not

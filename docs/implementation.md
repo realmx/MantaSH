@@ -11,7 +11,7 @@
 | SSH、指纹、密码认证、取消和重连 | `ssh.rs`、`services.rs`、`ui/dialogs.rs` | 回环真实 SSH 密码认证与指纹门禁；外部 Linux 实机 |
 | 连接导入导出 | `connections.rs`、`storage.rs`，连接库预览及导出 | 共用 CSV 示例，错误行与重复识别测试 |
 | SFTP 浏览与批量操作 | `files.rs`、`file_selection.rs`、`ui/tools.rs` | 路径范围单元测试、真实 SFTP 行选择和批量目标、文件列表双击 |
-| 在线编辑、严格编码、草稿保护 | `encoding.rs`、`files.rs`、`ui/tools.rs`、`ui/dialogs.rs` | BOM/二进制/8 MiB、外部修改后重读与最后保存覆盖、失败草稿保留和原生弹窗 |
+| 在线编辑、严格编码、草稿保护 | `encoding.rs`、`files.rs`、`ui/tools.rs`、`ui/dialogs.rs` | BOM/二进制/8 MB、外部修改后重读与最后保存覆盖、失败草稿保留和原生弹窗 |
 | 文件和目录传输、取消、重新传输；普通文件大小与环形上传进度 | `files.rs`、`services.rs`、`model.rs`、`ui/tools.rs`、`ui/dialogs.rs` | 原连接 Owner 与路径归属、异步本地大小读取、真实回环 SFTP 进度总量与字节哈希、原生环形图截图像素、两个并发许可、迟到终态测试 |
 | 历史查询、复制、填入、执行及删除 | `integration.rs`、`services.rs`、`ui/history.rs` | nonce、Bash 历史保护、共享 SSH 列表与独立本地列表；Shell/平台实际输入 |
 | Linux 概览、进程、端口 | `monitor.rs`、`ui/system.rs` | 真实命令解析、双采样、不可用反馈；用户已确认 Linux 模块人工验收 |

@@ -27,8 +27,8 @@ pub fn text(language: Language, key: &str) -> &'static str {
             "Updating closes current sessions and restarts the app. Unsaved files are checked first. The system may request installation permission or security confirmation.",
         ),
         "update_downloading" => (
-            "正在下载更新：{received} / {total} MiB",
-            "Downloading update: {received} / {total} MiB",
+            "正在下载更新：{received} / {total} MB",
+            "Downloading update: {received} / {total} MB",
         ),
         "update_preparing" => (
             "正在校验并准备安装…",

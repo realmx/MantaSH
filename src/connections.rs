@@ -38,8 +38,8 @@ pub struct ImportPreview {
 /// A `password` field is captured per row for explicit vault import and never
 /// becomes part of Profile.
 pub fn preview(text: &str, existing: &[Profile]) -> Result<ImportPreview> {
-    if text.len() > 8 * 1024 * 1024 {
-        bail!("Connection import exceeds the 8 MiB limit");
+    if text.len() > 8_000_000 {
+        bail!("Connection import exceeds the 8 MB limit");
     }
     #[derive(Deserialize)]
     struct CsvRow {

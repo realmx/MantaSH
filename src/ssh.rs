@@ -96,8 +96,8 @@ impl Remote {
             while let Some(message) = channel.wait().await {
                 match message {
                     ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
-                        if out.len() + data.len() > 8 * 1024 * 1024 {
-                            bail!("Monitor output exceeds 8 MiB");
+                        if out.len() + data.len() > 8_000_000 {
+                            bail!("Monitor output exceeds 8 MB");
                         }
                         out.extend_from_slice(&data);
                     }

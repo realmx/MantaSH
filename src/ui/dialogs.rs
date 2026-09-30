@@ -1432,8 +1432,8 @@ impl Workbench {
             if let Ok(Ok(Some(paths))) = paths.await {
                 if let Some(path) = paths.first().cloned() {
                     let task = runtime.spawn_blocking(move || {
-                        if std::fs::metadata(&path)?.len() > 8 * 1024 * 1024 {
-                            anyhow::bail!("Connection import exceeds the 8 MiB limit");
+                        if std::fs::metadata(&path)?.len() > 8_000_000 {
+                            anyhow::bail!("Connection import exceeds the 8 MB limit");
                         }
                         let text = std::fs::read_to_string(&path)?;
                         let text = text

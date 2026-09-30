@@ -36,7 +36,7 @@ name,host,port,username,password
 Development,example.test,22,developer,
 ```
 
-逗号或换行由 CSV 引号规则转义；导入时剥离 BOM。文件上限为 8 MiB；非法表头拒绝整个文件，行级错误单独显示并保留其它合法行。名称、主机和用户名须有效，主机不能包含 URL scheme、斜杠或空白。`example.test` 仅为示例，参见[完整示例](../examples/connections.csv)。
+逗号或换行由 CSV 引号规则转义；导入时剥离 BOM。文件上限为 8 MB；非法表头拒绝整个文件，行级错误单独显示并保留其它合法行。名称、主机和用户名须有效，主机不能包含 URL scheme、斜杠或空白。`example.test` 仅为示例，参见[完整示例](../examples/connections.csv)。
 
 名称、主机（忽略大小写）、端口、用户名都相同时视为重复，同文件内的重复也按此识别。预览默认跳过重复并保留其已存密码；明确选择更新才保留原连接 UUID 并更新资料，新记录分配新 UUID。确认导入后，仅对实际新增或更新且带密码的有效行尝试写入本机加密库，不进入 Profile 字段；合并不会先清空现有连接。
 
