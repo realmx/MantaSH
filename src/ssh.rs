@@ -10,6 +10,7 @@ use parking_lot::Mutex;
 use russh::{
     ChannelMsg, client,
     keys::{HashAlg, PublicKeyOrCertificate},
+    mac,
 };
 use russh_sftp::client::SftpSession;
 use std::{sync::Arc, time::Duration};
@@ -178,11 +179,19 @@ pub async fn connect_with_store(
         events: events.clone(),
         cancel: cancel.clone(),
     };
-    let config = Arc::new(client::Config {
+    // Match OpenSSH's `-oHostKeyAlgorithms=+ssh-rsa`: enable only the
+    // legacy RSA host-key algorithm while retaining russh's default suites.
+    let mut config = client::Config {
         keepalive_interval: Some(Duration::from_secs(20)),
         keepalive_max: 3,
         ..Default::default()
-    });
+    };
+    // CentOS 6 commonly requires the legacy group14-SHA1 KEX in addition
+    // to the ssh-rsa host-key algorithm. Keep every other russh default.
+    config.preferred.kex.to_mut().push(russh::kex::DH_G14_SHA1);
+    // CentOS 6 advertises only legacy MACs; enable the narrowest required one.
+    config.preferred.mac.to_mut().push(mac::HMAC_SHA1);
+    let config = Arc::new(config);
     // TCP timeout excludes the time a person takes to inspect the fingerprint.
     let socket = tokio::select! {
         _ = cancel.cancelled() => bail!("Connection cancelled"),
