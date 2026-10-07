@@ -36,5 +36,5 @@ jobs:
       - name: Validate documents and release helpers
         run: |
           python3 scripts/check_docs.py
-          python3 -m py_compile scripts/release_version.py scripts/release_matrix.py scripts/package_release.py scripts/release_notes.py scripts/update_homebrew_cask.py
+          python3 -m py_compile scripts/release_version.py scripts/release_matrix.py scripts/package_release.py scripts/verify_macos_dmg.py scripts/release_notes.py scripts/update_homebrew_cask.py
           python3 -m unittest discover -s tests -p 'test_release_*.py'

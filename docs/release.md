@@ -41,6 +41,8 @@ git push origin master
 
 macOS 应用使用 ad-hoc 签名，DMG 未经 Apple 公证，不要求或读取 Developer ID/公证 secrets；Windows 使用 [Inno Setup](../packaging/windows/MantaSH.iss) 打包，未做代码签名。工作流在 macOS runner 核对 DMG 校验和、架构、版本及签名；Windows runner 产出安装器；发布前要求五包及其校验文件全部存在并通过 SHA-256。任一目标失败，publish job 不执行。
 
+DMG 完整性验证由 `scripts/verify_macos_dmg.py` 调用 `hdiutil verify`：遇到 `Resource temporarily unavailable` 或 `Resource busy` 时，按 2、4、8、16 秒间隔重试，最多执行 5 次，并保留每次诊断输出。其它错误立即失败，重试耗尽仍阻止上传和发布；验证通过后才挂载镜像检查版本、架构和签名。
+
 macOS Gatekeeper 可能阻止首次启动，Windows SmartScreen 可能提示确认。先核对下载来源及校验和，macOS 按[用户手册](user-guide.md#macos-无法直接打开)使用系统“仍要打开”，不使用 `xattr` 等方式关闭安全检查。Actions 构建通过不等于 Windows 实机安装或运行验收通过。
 
 ## 应用内更新渠道
@@ -69,7 +71,7 @@ cargo fmt --all -- --check
 cargo test --locked --no-default-features --all-targets
 cargo check --locked --no-default-features --all-targets
 python3 scripts/release_version.py validate --version 1.0.0
-python3 -m py_compile scripts/package_release.py scripts/release_version.py scripts/release_matrix.py scripts/release_notes.py scripts/update_homebrew_cask.py
+python3 -m py_compile scripts/package_release.py scripts/verify_macos_dmg.py scripts/release_version.py scripts/release_matrix.py scripts/release_notes.py scripts/update_homebrew_cask.py
 python3 -m unittest discover -s tests -p 'test_release_*.py'
 python3 scripts/check_docs.py
 ```
@@ -93,4 +95,4 @@ gh run rerun <RUN_ID>
 gh workflow run release.yml --ref vX.Y.Z --field platform=all
 ```
 
-版本校验失败时检查 tag 来源与源码基准，不强制覆盖 tag。构建、签名校验或附件检查失败时查看对应 job；同名 tag 重跑会更新其已有 Release 附件，发布新版本应创建新 tag。开发构件过期后重新触发分支构建即可。
+版本校验失败时检查 tag 来源与源码基准，不强制覆盖 tag。构建、签名校验或附件检查失败时查看对应 job；同名 tag 重跑会更新其已有 Release 附件，发布新版本应创建新 tag。重跑使用原 tag 对应的源码和 workflow，不会带入后续提交的修复；发布脚本或 workflow 修复应经 `master` 生成新 tag，保留原失败 tag。开发构件过期后重新触发分支构建即可。

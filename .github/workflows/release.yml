@@ -82,7 +82,7 @@ jobs:
           base="MantaSH-${{ needs.prepare.outputs.package_version }}-${{ matrix.name }}"
           cd dist
           for checksum in *.sha256; do shasum -a 256 -c "$checksum"; done
-          /usr/bin/hdiutil verify "$base.dmg"
+          "${{ matrix.python }}" ../scripts/verify_macos_dmg.py "$base.dmg"
           mount="$RUNNER_TEMP/mantash-release-${{ matrix.name }}"
           mkdir -p "$mount"
           /usr/bin/hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$base.dmg"

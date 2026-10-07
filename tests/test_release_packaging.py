@@ -20,6 +20,7 @@ import release_matrix
 import release_notes
 import release_version
 import update_homebrew_cask
+import verify_macos_dmg
 
 SHA = "f" * 40
 
@@ -298,6 +299,89 @@ class ReleaseVersionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "license metadata"):
                 release_version.stage(root, "99.0.0")
             self.assertEqual((root / "Cargo.toml").read_bytes(), before)
+
+
+class MacosDmgVerificationTests(unittest.TestCase):
+    @staticmethod
+    def result(code=0, stdout="", stderr=""):
+        return subprocess.CompletedProcess(["/usr/bin/hdiutil", "verify", "image.dmg"],
+                                           code, stdout=stdout, stderr=stderr)
+
+    def test_success_requires_no_retry(self):
+        with patch.object(verify_macos_dmg.subprocess, "run", return_value=self.result()) as run, patch.object(
+            verify_macos_dmg.time, "sleep"
+        ) as sleep, redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            verify_macos_dmg.verify(Path("image.dmg"))
+        self.assertEqual(run.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_transient_resource_errors_retry_the_same_verification(self):
+        image = Path("image path ' quote.dmg")
+        for message in ("Resource temporarily unavailable", "Resource busy"):
+            with self.subTest(message=message):
+                failure = f'hdiutil: verify: unable to recognize "{image}" as a disk image. ({message})\n'
+                stdout, stderr = StringIO(), StringIO()
+                with patch.object(verify_macos_dmg.subprocess, "run", side_effect=[
+                    self.result(1, stderr=failure), self.result(stdout="verified\n")
+                ]) as run, patch.object(verify_macos_dmg.time, "sleep") as sleep, redirect_stdout(
+                    stdout
+                ), redirect_stderr(stderr):
+                    verify_macos_dmg.verify(image)
+                self.assertEqual(run.call_count, 2)
+                for call in run.call_args_list:
+                    self.assertEqual(call.args[0], ["/usr/bin/hdiutil", "verify", str(image.resolve())])
+                    self.assertEqual(call.kwargs["env"]["LC_ALL"], "C")
+                sleep.assert_called_once_with(2)
+                self.assertIn(failure, stderr.getvalue())
+                self.assertIn("retrying in 2s", stderr.getvalue())
+                self.assertEqual(stdout.getvalue(), "verified\n")
+
+    def test_permanent_image_errors_fail_without_retry(self):
+        for message in ("hdiutil: verify failed - checksum error",
+                        "hdiutil: verify: image not recognized",
+                        "hdiutil: verify failed - No such file or directory"):
+            with self.subTest(message=message), patch.object(
+                verify_macos_dmg.subprocess, "run", return_value=self.result(1, stderr=message)
+            ) as run, patch.object(verify_macos_dmg.time, "sleep") as sleep, redirect_stdout(
+                StringIO()
+            ), redirect_stderr(StringIO()):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    verify_macos_dmg.verify(Path("image.dmg"))
+                self.assertEqual(run.call_count, 1)
+                sleep.assert_not_called()
+
+    def test_persistent_resource_error_exhausts_retries_and_preserves_exit_status(self):
+        with patch.object(verify_macos_dmg.subprocess, "run", return_value=self.result(
+            35, stderr="hdiutil: verify failed - Resource temporarily unavailable"
+        )) as run, patch.object(verify_macos_dmg.time, "sleep") as sleep, redirect_stdout(
+            StringIO()
+        ), redirect_stderr(StringIO()), self.assertRaises(subprocess.CalledProcessError) as error:
+            verify_macos_dmg.verify(Path("image.dmg"))
+        self.assertEqual(error.exception.returncode, 35)
+        self.assertEqual(run.call_count, 5)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 4, 8, 16])
+
+    def test_permanent_error_after_transient_failure_stops_retries(self):
+        with patch.object(verify_macos_dmg.subprocess, "run", side_effect=[
+            self.result(1, stderr="Resource temporarily unavailable"),
+            self.result(1, stderr="checksum error"), self.result()
+        ]) as run, patch.object(verify_macos_dmg.time, "sleep") as sleep, redirect_stdout(
+            StringIO()
+        ), redirect_stderr(StringIO()), self.assertRaises(subprocess.CalledProcessError):
+            verify_macos_dmg.verify(Path("image.dmg"))
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_cli_returns_failure_when_verification_fails(self):
+        with TemporaryDirectory() as directory:
+            image = Path(directory) / "image.dmg"
+            image.write_bytes(b"invalid image fixture")
+            for failure, status in ((subprocess.CalledProcessError(35, ["hdiutil", "verify"]), 35),
+                                    (FileNotFoundError("hdiutil unavailable"), 1)):
+                with self.subTest(failure=failure), patch.object(
+                    verify_macos_dmg, "verify", side_effect=failure
+                ), redirect_stderr(StringIO()):
+                    self.assertEqual(verify_macos_dmg.main([str(image)]), status)
 
 
 class ReleasePackageTests(unittest.TestCase):
