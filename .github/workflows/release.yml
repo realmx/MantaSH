@@ -47,8 +47,8 @@ jobs:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust 1.88
-        uses: dtolnay/rust-toolchain@1.88.0
+      - name: Install Rust 1.89
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
           targets: ${{ matrix.target }}
       - name: Cache Cargo

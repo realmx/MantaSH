@@ -57,7 +57,7 @@ brew install realmx/taps/mantash --cask
 
 ## 开发与发布
 
-源码运行需要 Rust 1.88 和对应平台的 C/C++ 工具链；首次构建需要下载依赖。平台准备见[开发文档](docs/development.md)。
+源码运行需要 Rust 1.89 或更新版本，以及对应平台的 C/C++ 工具链；首次构建需要下载依赖。平台准备见[开发文档](docs/development.md)。
 
 ```sh
 git clone https://github.com/realmx/MantaSH.git

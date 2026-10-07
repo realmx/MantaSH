@@ -2,7 +2,7 @@
 name = "mantash"
 version = "1.1.10"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 description = "A compact native terminal for local and SSH work"
 license = "GPL-3.0-or-later"
 homepage = "https://github.com/realmx/mantash"
@@ -42,7 +42,7 @@ semver = "1"
 # 开启 debug-embed 将图标嵌入二进制，打包后的试用应用在任意机器都能渲染图标。
 rust-embed = { version = "=8.12.0", optional = true, features = ["debug-embed"] }
 rusqlite = { version = "0.38", features = ["bundled"] }
-russh = { version = "0.63", default-features = false, features = ["ring", "rsa"] }
+russh = { version = "0.63.2", default-features = false, features = ["ring", "rsa"] }
 russh-sftp = "2.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

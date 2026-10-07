@@ -4,7 +4,7 @@ Windows x86、x64 和 ARM64 的公开包为未签名 Inno Setup 安装器，可�
 
 ## 环境与构建
 
-在 Windows 上安装 Rust 1.88 的 MSVC 工具链、Visual Studio Build Tools 的“使用 C++ 的桌面开发”组件及 Windows SDK。x86/ARM64 目标另需对应 target 和编译工具；有 PowerShell 7 时程序优先使用，否则回退系统 PowerShell，再回退 CMD。无需 Node.js 或浏览器前端。
+在 Windows 上安装 Rust 1.89 或更新版本的 MSVC 工具链、Visual Studio Build Tools 的“使用 C++ 的桌面开发”组件及 Windows SDK。x86/ARM64 目标另需对应 target 和编译工具；有 PowerShell 7 时程序优先使用，否则回退系统 PowerShell，再回退 CMD。无需 Node.js 或浏览器前端。
 
 保留源码、`Cargo.lock`、assets、docs、examples 与 scripts，不复制本地 `target/`、`dist/`、数据库或凭据。在项目根目录的 PowerShell 中：
 

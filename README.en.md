@@ -57,7 +57,7 @@ These are full native macOS debug-window captures from an isolated data director
 
 ## Development and Releases
 
-Building from source requires Rust 1.88 and the native C/C++ toolchain for your platform; the first build downloads dependencies. See [development](docs/development.md) for platform setup.
+Building from source requires Rust 1.89 or newer and the native C/C++ toolchain for your platform; the first build downloads dependencies. See [development](docs/development.md) for platform setup.
 
 ```sh
 git clone https://github.com/realmx/MantaSH.git

@@ -10,7 +10,7 @@ brew install realmx/taps/mantash --cask
 
 ## 源码环境
 
-安装 Rust 1.88 或兼容工具链及 Xcode Command Line Tools（或 Xcode）。在项目根目录确认：
+安装 Rust 1.89 或更新的兼容工具链及 Xcode Command Line Tools（或 Xcode）。在项目根目录确认：
 
 ```sh
 rustc --version

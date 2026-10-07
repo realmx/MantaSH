@@ -204,7 +204,8 @@ cargo test --locked --no-default-features --test ssh_sftp native_qa_fixture -- -
 
 ## 依赖、资源与发布
 
-- 保留锁文件。新增依赖前检查平台支持、许可证与功能必要性，并同步第三方清单（`docs/dependency-licenses.csv`）。
+- 保留锁文件。新增或升级依赖前检查平台支持、最低 Rust 版本、许可证与功能必要性，并同步第三方清单（`docs/dependency-licenses.csv`）。
+- SSH 依赖要求 `russh >= 0.63.2`，Windows 间接依赖 `pageant` 锁定为 `0.2.3`；两者的安全修复要求 Rust 1.89，CI 与发布构建使用该工具链。正式功能仅使用 SSH 客户端密码认证，不启动 SSH 服务端或连接 Pageant 代理。
 - LOGO 源几何在 assets SVG，`scripts/generate_logo.py`（Pillow）按同一 64 单位几何生成各尺寸 PNG、ICO 和 ICNS；只是资源生成，不是应用打包。品牌规范见[设计规范](design.md#品牌资源)。
 - 本地开发与调试运行 `cargo run --locked`（[macOS 指南](macos.md)、[Windows 指南](windows.md)）；`scripts/package_release.py` 可在对应平台配合已构建二进制做本地验包，正式公开发布由 GitHub runner 完成。公开版本使用 `scripts/release_version.py` 从 `Cargo.toml` 基准版本和既有 tag 计算下一个 `vX.Y.Z` 并在构建前验证输入；`release.yml` 在 runner 上临时把 `Cargo.toml`、`Cargo.lock` 和 `docs/dependency-licenses.csv` 同步为 tag 版本后编译，主分支不产生版本提交。完整触发方式和产物边界见[发布文档](release.md)；GitHub Actions 交叉编译通过不等于目标平台人工验收通过。
 - 提交遵守[贡献指南](../CONTRIBUTING.md)和 [AI 规范](../AGENTS.md)。
