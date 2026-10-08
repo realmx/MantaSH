@@ -371,7 +371,7 @@ impl Workbench {
                 let process_parent = matches!((&current, &modal),
                     (Modal::ProcessDetails { owner: left, process, .. }, Modal::ProcessConfirm { owner: right, process: target, .. })
                     if left == right && process.identity == target.identity);
-                let update_parent = matches!((&current, &modal), (Modal::Settings, Modal::Update));
+                let update_parent = matches!((&current, &modal), (Modal::About, Modal::Update));
                 let captures_parent = connection_parent
                     || history_parent
                     || editor_parent
@@ -1676,7 +1676,6 @@ impl Workbench {
                 footer = footer.child(self.render_update_footer(cx));
             }
             Modal::About => {
-                footer_hidden = true;
                 title = self.t("about_mantash").into();
                 body = body
                     .items_center()
@@ -1699,6 +1698,9 @@ impl Workbench {
                                 this.open_github(cx);
                             })),
                     );
+                // Version display and update checks answer the same question,
+                // so the manual entry lives beside the version it inspects.
+                footer = footer.child(self.check_update_button(cx));
             }
             Modal::WindowControls(form) => {
                 title = self.t("window_controls").into();
@@ -2098,7 +2100,7 @@ impl Workbench {
                             ),
                     );
                 }
-                footer = footer.items_center().justify_between().child(
+                footer = footer.child(
                     self.button("reset-settings", self.t("reset_defaults"))
                         .on_click(cx.listener(|this, _, w, cx| {
                             // Reset exactly the items this dialog shows:
@@ -2114,7 +2116,6 @@ impl Workbench {
                             this.apply_preferences(w, cx);
                         })),
                 );
-                footer = footer.child(self.check_update_button(cx));
             }
             Modal::Font { terminal, filter } => {
                 title = self

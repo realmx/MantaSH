@@ -99,13 +99,13 @@ QA：`scripts/qa_transfers_macos.py --directory <目录> --fixture <fixture 目�
 - macOS `install_system_menu` 显式注册本地化的 NSApplication.windowsMenu，并使用标准 performMiniaturize:/performZoom: responder action（锁定版 GPUI 只会自动注册字面名称为 Window 的菜单）。顶栏/快捷键经保留的 NSMenu 和所属 NSView 打开真正的系统菜单，在前台执行器中释放 GPUI 更新借用后进入 AppKit 菜单循环；系统负责平铺、居中、全屏与还原选项。
  - Windows 使用透明的 GPUI 组件标题栏，顶栏空白区域按 ashell 同类方式在拖动阈值后释放鼠标捕获并投递 `WM_SYSCOMMAND(SC_MOVE | HTCAPTION)`，避免 GPUI Windows 后端的 `start_window_move` 空实现。右侧最小化、最大化/还原、关闭按钮分别映射 `SC_MINIMIZE`、`SC_MAXIMIZE/SC_RESTORE`、`SC_CLOSE`，同时注册 `WindowControlArea::{Min,Max,Close}`；关闭仍经过应用已有的未保存变更确认。标签、控件和弹窗遮罩保持独立交互。Windows 验收需覆盖无重复 LOGO、三枚按钮、空白区拖动和双击最大化/还原。本地 Shell 选择持久化在 `Preferences.local_shell`，在 UI 线程外发现，且只作用于新建本地会话；不可用的选择明确报错，已有会话保留原 Shell。
 - `window_layout.rs`、尺寸表单和直接几何接口保留给其它平台与几何回归；macOS 日常菜单使用系统 WindowMenuProbe 和菜单只读快照。Windows 适配未实机验证，Linux 不新增本地 VM/容器。
-- 应用菜单以本地化的“关于 MantaSH / About MantaSH”为首项，接分隔线、“设置”、Services 和退出。`OpenAbout` 派发 `ShowAboutModal` 打开应用内 `Modal::About`，正文显示应用名和 `APP_VERSION`；右上角关闭或 Esc 退出，不显示 footer 及其分隔线、占位间距。设置 footer 左侧为“恢复默认”、右侧为“检查更新”，不再显示版本号。
+- 应用菜单以本地化的“关于 MantaSH / About MantaSH”为首项，接分隔线、“设置”、Services 和退出。`OpenAbout` 派发 `ShowAboutModal` 打开应用内 `Modal::About`，正文显示应用名和 `APP_VERSION`，footer 提供“检查更新”；右上角关闭或 Esc 退出。设置 footer 仅右侧“恢复默认”，不再显示版本号。
 
 ## 自动更新
 
 `update.rs` 负责固定官方源的版本检查、平台资源选择、流式下载、SHA-256 校验与平台安装助手。`ui/updates.rs` 维护检查、询问、下载、准备、关闭交接和失败状态；每次下载/准备结果须匹配本次请求 ID，取消使旧结果失效。文件及进程操作在后台执行，暂存包清理也不在 GPUI 主线程执行。
 
-设置 footer 的“检查更新”进入手动模式，显示检查中、无适用更新、发现新版本或失败；正在进行的自动请求可以被手动接管而不重复发起。手动请求不受本次已取消版本集合抑制；确认弹窗保存设置父页面，取消时先使请求 ID 失效再返回设置。`cargo test --locked --lib ui::updates::tests` 覆盖结果模式、重复请求、取消与迟到结果。
+关于弹窗 footer 的“检查更新”进入手动模式，显示检查中、无适用更新、发现新版本或失败；正在进行的自动请求可以被手动接管而不重复发起。手动请求不受本次已取消版本集合抑制；确认弹窗保存关于父页面，取消时先使请求 ID 失效再返回关于弹窗。`cargo test --locked --lib ui::updates::tests` 覆盖结果模式、重复请求、取消与迟到结果。
 
 `CloseTarget::Update` 复用草稿和传输的关闭保护；保存草稿时保留更新同意，取消则清除待更新关闭目标。工作区成功保存后才启动安装助手，助手等待应用退出后安装，启动助手本身不代表安装成功。原生 QA 可运行 `python3 scripts/qa_updates_macos.py --binary target/debug/mantash --directory <全新隔离目录>`，需要较旧的 debug 二进制和可访问 GitHub 的网络，仅检查提示、延后显示与取消，不确认下载或安装。完整测试边界见[自动更新](updates.md)。
 

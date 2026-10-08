@@ -22,6 +22,8 @@ pub enum Action {
         #[serde(default)]
         manual: bool,
     },
+    /// Open the client-drawn About dialog that carries the manual update entry.
+    About,
     /// Send a bounded pointer gesture only to this isolated app's own native window.
     PointerGesture {
         points: Vec<[f32; 2]>,
@@ -1321,6 +1323,7 @@ impl Workbench {
             }
             Action::Sidebar => self.toggle_sidebar(window, cx),
             Action::Settings => self.open_settings(window, cx),
+            Action::About => self.show_modal(Modal::About, window, cx),
             Action::SshForm => self.profile_form(None, None, window, cx),
             Action::OpenFontPicker { terminal } => self.open_font_picker(terminal, window, cx),
             Action::SelectFont { family } => self.select_font(family, window, cx),

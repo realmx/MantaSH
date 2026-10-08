@@ -29,13 +29,13 @@ def main():
         driver = Driver(root, process)
         try:
             driver.wait(lambda state: bool(state["tabs"]), "native startup")
-            driver.action("settings")
-            driver.wait(lambda state: state["modal"] == "settings", "Settings opens")
+            driver.action("about")
+            driver.wait(lambda state: state["modal"] == "about", "About opens")
             driver.action("check_updates")
             state = driver.wait(lambda state: state["update"]["phase"] == "Available",
                                 "a newer official stable release (requires an older binary and network)")
             version = state["update"]["version"]
-            assert state["modal"] == "settings", state
+            assert state["modal"] == "about", state
             assert state["update"]["downloaded"] == 0 and not state["update"]["prepared"], state
             driver.action("keystroke", key="escape")
             state = driver.wait(lambda state: state["modal"] == "update", "deferred update prompt")
@@ -50,8 +50,8 @@ def main():
             state = driver.wait(lambda state: state["update"]["phase"] == "Idle"
                                 and not state["update"]["request_active"], "same-version check completes")
             assert state["modal"] is None and version in state["update"]["declined"], state
-            driver.action("settings")
-            driver.wait(lambda state: state["modal"] == "settings", "Settings reopens")
+            driver.action("about")
+            driver.wait(lambda state: state["modal"] == "about", "About reopens")
             driver.action("check_updates", manual=True)
             state = driver.wait(lambda state: state["modal"] == "update"
                                 and state["update"]["phase"] == "Available"
@@ -59,12 +59,12 @@ def main():
             assert state["update"]["version"] == version, state
             assert state["update"]["downloaded"] == 0, state
             driver.action("keystroke", key="escape")
-            state = driver.wait(lambda state: state["modal"] == "settings"
-                                and state["update"]["phase"] == "Idle", "manual check returns to Settings")
+            state = driver.wait(lambda state: state["modal"] == "about"
+                                and state["update"]["phase"] == "Idle", "manual check returns to About")
             assert not state["update"]["request_active"], state
             report = {"offered_version": version, "existing_modal_preserved": True,
                       "cancelled_without_download": True, "same_version_suppressed": True,
-                      "manual_check_offers_declined_version": True, "manual_cancel_returns_to_settings": True,
+                      "manual_check_offers_declined_version": True, "manual_cancel_returns_to_about": True,
                       "scope": "native window with programmatic Esc; official metadata only; no installation"}
             (root / "updates-results.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2) + "\n")
