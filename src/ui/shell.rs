@@ -1322,26 +1322,8 @@ impl Workbench {
                             })),
                     )
                 })
-                // Session editing stays on the right of the toolbar.
-                .when(!local, |h| {
-                    if let SessionSpec::Ssh { profile, .. } = &pane.spec {
-                        let profile = profile.clone();
-                        h.child(
-                            self.icon_button(
-                                ("session-edit", owner.session.as_u128() as u64),
-                                "edit",
-                                IconName::Settings2,
-                            )
-                            .on_click(cx.listener(
-                                move |this, _, w, cx| {
-                                    this.profile_form(Some(profile.clone()), None, w, cx)
-                                },
-                            )),
-                        )
-                    } else {
-                        h
-                    }
-                })
+                // Connection profiles are edited from the connection
+                // library; the session toolbar carries no edit entry.
                 .when(!local, |h| {
                     h.child(
                         self.button("ssh-history", "")
