@@ -1922,25 +1922,50 @@ impl Workbench {
             .children(records.iter().enumerate().map(|(index, task)| {
                 let task = *task;
                 let id = task.id;
-                // Status: a percentage while transferring, a directional icon
-                // once finished; other states keep their text.
+                // Running tasks share the transfer dialog's determinate chart;
+                // unknown totals use a spinner, with details available on hover.
                 let direction_key = if task.upload {
                     "uploading"
                 } else {
                     "downloading"
                 };
                 let status: AnyElement = match (task.upload, &task.state) {
-                    (_, TransferState::Running) => div()
-                        .text_color(p.accent)
-                        .child(match task.total {
-                            Some(total) if total > 0 => format!(
-                                "{} {}%",
+                    (_, TransferState::Running) => {
+                        let fraction = super::transfer_paths::transfer_progress_fraction(
+                            task.bytes, task.total,
+                        );
+                        let tooltip = match fraction {
+                            Some(value) => {
+                                format!("{} {}%", self.t(direction_key), (value * 100.) as u32)
+                            }
+                            None => format!(
+                                "{} {}",
                                 self.t(direction_key),
-                                (task.bytes as f32 / total as f32 * 100.).min(100.) as u32
+                                crate::monitor::bytes(task.bytes)
                             ),
-                            _ => self.t(direction_key).to_string(),
-                        })
-                        .into_any_element(),
+                        };
+                        let progress = match fraction {
+                            Some(value) => self.transfer_progress_ring(value),
+                            None => gpui_component::spinner::Spinner::new()
+                                .with_size(px(14.))
+                                .color(p.accent)
+                                .into_any_element(),
+                        };
+                        div()
+                            .id(("transfer-progress", id.as_u128() as u64))
+                            .w(px(24.))
+                            .h(px(24.))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(tooltip.clone())
+                                    .build(window, cx)
+                            })
+                            .child(progress)
+                            .into_any_element()
+                    }
                     (upload, TransferState::Completed) => gpui::svg()
                         .path(if upload {
                             "icons/upload.svg"

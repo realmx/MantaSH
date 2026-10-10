@@ -1535,7 +1535,7 @@ impl Workbench {
         )
     }
     /// Paint a determinate transfer ring inside the fixed 24px status slot.
-    fn transfer_progress_ring(&self, fraction: f32) -> AnyElement {
+    pub(super) fn transfer_progress_ring(&self, fraction: f32) -> AnyElement {
         let palette = theme::Palette::new(self.prefs.theme);
         canvas(
             |_, _, _| {},
