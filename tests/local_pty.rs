@@ -309,6 +309,27 @@ fn ctrl_z_after_a_survived_ctrl_c_keeps_the_suspended_job() {
     assert!(suspended && stopped, "the suspended job was signalled");
 }
 
+/// Closing a tab hangs up the PTY like a terminal window closing. A shell that
+/// ignores SIGHUP must still exit on the hangup instead of outliving the tab.
+#[cfg(unix)]
+#[test]
+fn closing_a_tab_hangs_up_a_shell_that_ignores_sighup() {
+    let Some(shell) = InteractiveBash::start() else {
+        return;
+    };
+    shell
+        .session
+        .input(b"trap '' HUP; echo $$ > shell.pid\r".to_vec());
+    let pid = shell.pid_file("shell.pid");
+    shell.run_and_wait("HUP_IGNORED");
+    shell.backend.close(shell.owner);
+    let exited = wait_until(Duration::from_secs(5), || !process_running(pid));
+    if !exited {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+    assert!(exited, "the shell outlived its closed tab");
+}
+
 /// The zsh integration must keep the user's real HISTFILE: /etc/zshrc derives
 /// it from the overridden ZDOTDIR, and without the restore the terminal neither
 /// loads ~/.zsh_history nor appends new commands to it.

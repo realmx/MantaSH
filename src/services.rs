@@ -520,6 +520,13 @@ impl Backend {
                     }
                 }
             }
+            // Hang up the terminal before reaping, as a terminal closing its
+            // window does: a shell that survives SIGHUP then sees EIO and
+            // exits instead of keeping this worker and its jobs alive.
+            drop(probe);
+            drop(writer);
+            drop(reader);
+            drop(master);
         }
         #[cfg(not(unix))]
         {
