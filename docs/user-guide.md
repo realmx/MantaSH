@@ -36,7 +36,7 @@ brew upgrade --cask mantash
 
 ## 本地终端
 
-macOS 使用系统 `$SHELL`；Windows 可在设置中选择已发现的本地 Shell（PowerShell 7、系统 PowerShell、CMD、Bash 等），选择仅对新建本地会话生效，已有会话继续使用原 Shell。初始目录为用户主目录。Tab/Shift+Tab 交给终端程序或 Shell 补全；连接与设置表单中的 Tab 仍切换控件，输入法组合期间不提交补全键。Ctrl+C、Ctrl+D 保持 Shell 含义。macOS/Linux 上用 Ctrl+C 中断前台任务（如 `pnpm run dev`）后，若任务主进程已退出、Shell 已收回终端，而同一任务进程组中仍有成员在运行（例如忽略 SIGINT 的 `&` 子进程，或在包装器放弃后仍卡在退出流程中的开发服务器），MantaSH 会向这些剩余成员发送一次 SIGHUP，释放其占用的端口；`nohup` 进程、Ctrl+Z 挂起的任务，以及通过 `detached`/`setsid` 自行脱离该进程组的进程不受影响。
+macOS 使用系统 `$SHELL`；Windows 可在设置中选择已发现的本地 Shell（PowerShell 7、系统 PowerShell、CMD、Bash 等），选择仅对新建本地会话生效，已有会话继续使用原 Shell。初始目录为用户主目录。Tab/Shift+Tab 交给终端程序或 Shell 补全；连接与设置表单中的 Tab 仍切换控件，输入法组合期间不提交补全键。Ctrl+C、Ctrl+D 保持 Shell 含义。macOS/Linux 上用 Ctrl+C 中断前台任务（如 `pnpm run dev`）后，若任务主进程在 3 秒内退出、Shell 已收回终端，而同一任务进程组中仍有成员在运行（例如忽略 SIGINT 的 `&` 子进程，或在包装器放弃后仍卡在退出流程中的开发服务器），MantaSH 会向这些剩余成员发送一次 SIGHUP，释放其占用的端口；`nohup` 进程、Ctrl+Z 挂起的任务，以及通过 `detached`/`setsid` 自行脱离该进程组的进程不受影响。
 
 设置中点击“本地终端 Shell（新会话生效）”下一行的选择器可展开下拉菜单，点击目标 Shell 后保存；当前项显示勾选标记。点击选择器本身不会轮换 Shell，取消菜单不修改选择。
 
