@@ -1620,8 +1620,7 @@ impl Workbench {
                 let _ = line.paint(origin, line_height, window, cx);
             },
         )
-        .flex_1()
-        .min_w_0()
+        .w_full()
         .h(px(24.))
         .into_any_element()
     }
@@ -2843,111 +2842,47 @@ impl Workbench {
                             TransferState::Interrupted => "interrupted",
                         };
                         let size = shown.total.or(record.total);
+                        // Every phase shows one row of state, name and size; paths, status
+                        // and errors are on hover so long values never grow the row.
+                        let mut detail = Vec::new();
                         if *phase != TransferPhase::Review {
-                            // Once submitted, a row is only state, name and size; the
-                            // leading icon carries the state and the rest is on hover.
-                            let status = match transfer_progress_fraction(shown.bytes, shown.total)
-                            {
-                                Some(fraction) if shown.state == TransferState::Running => {
-                                    format!(
-                                        "{} · {}%",
-                                        self.t(status_key),
-                                        (fraction * 100.) as u32
-                                    )
-                                }
-                                _ if shown.state == TransferState::Running && shown.bytes > 0 => {
-                                    format!(
-                                        "{} · {}",
-                                        self.t(status_key),
-                                        crate::monitor::bytes(shown.bytes)
-                                    )
-                                }
-                                _ => self.t(status_key).to_string(),
-                            };
-                            let detail = std::iter::once(status)
-                                .chain([
-                                    format!("{} {}", self.t("source_path"), source),
-                                    format!("{} {}", self.t("target_path"), destination),
-                                ])
-                                .chain(shown.error.clone())
-                                .collect::<Vec<_>>();
-                            let retry_record = (*phase == TransferPhase::Result
-                                && matches!(
-                                    shown.state,
-                                    TransferState::Failed
-                                        | TransferState::Cancelled
-                                        | TransferState::Interrupted
-                                ))
-                            .then(|| shown.clone());
-                            return div()
-                                .id(("transfer-batch-item", id.as_u128() as u64))
-                                .w_full()
-                                .flex()
-                                .items_center()
-                                .gap(px(theme::SPACE_CONTROL))
-                                .py(px(theme::SPACE_CONTROL))
-                                .when(index == 0 && measure_frame, |row| {
-                                    row.relative().child(self.measure_transfer_cell("row", cx))
-                                })
-                                .when(index + 1 < records.len(), |row| {
-                                    row.border_b_1().border_color(p.border)
-                                })
-                                .tooltip(move |window, cx| {
-                                    let detail = detail.clone();
-                                    gpui_component::tooltip::Tooltip::element(move |_, _| {
-                                        div().max_w(px(360.)).whitespace_normal().children(
-                                            detail.iter().map(|line| div().child(line.clone())),
+                            detail.push(
+                                match transfer_progress_fraction(shown.bytes, shown.total) {
+                                    Some(fraction) if shown.state == TransferState::Running => {
+                                        format!(
+                                            "{} · {}%",
+                                            self.t(status_key),
+                                            (fraction * 100.) as u32
                                         )
-                                    })
-                                    .build(window, cx)
-                                })
-                                .child(
-                                    div()
-                                        .w(px(24.))
-                                        .h(px(24.))
-                                        .flex_none()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .child(leading),
-                                )
-                                .child(
-                                    self.transfer_name_line(
-                                        super::transfer_paths::display_name(record)
-                                            .to_string()
-                                            .into(),
-                                    ),
-                                )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .whitespace_nowrap()
-                                        .text_color(p.muted)
-                                        .child(
-                                            size.map(crate::monitor::bytes)
-                                                .unwrap_or_else(|| "—".into()),
-                                        ),
-                                )
-                                .when_some(retry_record, |row, retry_record| {
-                                    row.child(
-                                        self.button(
-                                            ("retry-batch-item", id.as_u128() as u64),
-                                            self.t("retry"),
+                                    }
+                                    _ if shown.state == TransferState::Running
+                                        && shown.bytes > 0 =>
+                                    {
+                                        format!(
+                                            "{} · {}",
+                                            self.t(status_key),
+                                            crate::monitor::bytes(shown.bytes)
                                         )
-                                        .ghost()
-                                        .on_click(
-                                            cx.listener(move |this, _, w, cx| {
-                                                this.retry_transfer(retry_record.clone(), w, cx)
-                                            }),
-                                        ),
-                                    )
-                                })
-                                .into_any_element();
+                                    }
+                                    _ => self.t(status_key).to_string(),
+                                },
+                            );
                         }
+                        detail.push(format!("{} {}", self.t("source_path"), source));
+                        detail.push(format!("{} {}", self.t("target_path"), destination));
+                        detail.extend(shown.error.clone());
+                        let retry_record = (*phase == TransferPhase::Result
+                            && matches!(
+                                shown.state,
+                                TransferState::Failed
+                                    | TransferState::Cancelled
+                                    | TransferState::Interrupted
+                            ))
+                        .then(|| shown.clone());
                         div()
                             .w_full()
                             .flex()
-                            .items_start()
+                            .items_center()
                             .gap(px(theme::SPACE_CONTROL))
                             .py(px(theme::SPACE_CONTROL))
                             .when(index == 0 && measure_frame, |row| {
@@ -2958,130 +2893,99 @@ impl Workbench {
                             })
                             .child(
                                 div()
-                                    .w(px(24.))
-                                    .h(px(24.))
-                                    .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(leading),
-                            )
-                            .child(
-                                div()
+                                    .id(("transfer-batch-item", id.as_u128() as u64))
                                     .flex_1()
                                     .min_w_0()
                                     .flex()
-                                    .flex_col()
-                                    .gap(px(theme::SPACE_SMALL))
-                                    .when(index == 0 && measure_frame, |column| {
-                                        column
-                                            .relative()
-                                            .child(self.measure_transfer_cell("column", cx))
+                                    .items_center()
+                                    .gap(px(theme::SPACE_CONTROL))
+                                    .tooltip(move |window, cx| {
+                                        let detail = detail.clone();
+                                        gpui_component::tooltip::Tooltip::element(move |_, _| {
+                                            div().max_w(px(360.)).whitespace_normal().children(
+                                                detail.iter().map(|line| div().child(line.clone())),
+                                            )
+                                        })
+                                        .build(window, cx)
                                     })
                                     .child(
                                         div()
-                                            .min_w_0()
-                                            .whitespace_normal()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .child(
-                                                super::transfer_paths::display_name(record)
-                                                    .to_string(),
-                                            ),
+                                            .w(px(24.))
+                                            .h(px(24.))
+                                            .flex_none()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(leading),
                                     )
                                     .child(
                                         div()
-                                            .flex()
+                                            .flex_1()
                                             .min_w_0()
-                                            .when(index == 0 && measure_frame, |source| {
-                                                source
-                                                    .relative()
-                                                    .child(self.measure_transfer_cell("source", cx))
+                                            .when(index == 0 && measure_frame, |name| {
+                                                name.relative()
+                                                    .child(self.measure_transfer_cell("name", cx))
                                             })
-                                            .gap(px(theme::SPACE_CONTROL))
-                                            .text_color(p.muted)
-                                            .child(div().flex_none().child(self.t("source_path")))
                                             .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .when(index == 0 && measure_frame, |path| {
-                                                        path.relative().child(
-                                                            self.measure_transfer_cell(
-                                                                "source_path",
-                                                                cx,
-                                                            ),
-                                                        )
-                                                    })
-                                                    .whitespace_normal()
-                                                    .child(source.to_string()),
+                                                self.transfer_name_line(
+                                                    super::transfer_paths::display_name(record)
+                                                        .to_string()
+                                                        .into(),
+                                                ),
                                             ),
                                     )
                                     .child(
                                         div()
-                                            .flex()
-                                            .min_w_0()
-                                            .gap(px(theme::SPACE_CONTROL))
+                                            .flex_none()
+                                            .whitespace_nowrap()
                                             .text_color(p.muted)
-                                            .child(div().flex_none().child(self.t("target_path")))
                                             .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .whitespace_normal()
-                                                    .child(destination.to_string()),
+                                                size.map(crate::monitor::bytes)
+                                                    .unwrap_or_else(|| "—".into()),
                                             ),
-                                    )
-                                    .when_some(shown.error.clone(), |column, error| {
-                                        column.child(
-                                            div()
-                                                .min_w_0()
-                                                .whitespace_normal()
-                                                .text_color(p.error)
-                                                .child(error),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .w(px(100.))
-                                    .flex_none()
-                                    .flex()
-                                    .flex_col()
-                                    .items_end()
-                                    .gap(px(theme::SPACE_SMALL))
-                                    .child(
-                                        div().whitespace_nowrap().text_color(p.muted).child(
-                                            size.map(crate::monitor::bytes)
-                                                .unwrap_or_else(|| "—".into()),
-                                        ),
-                                    )
-                                    .child(
-                                        self.button(
-                                            ("remove-transfer-target", id.as_u128() as u64),
-                                            "",
-                                        )
-                                        .icon(IconName::Close)
-                                        .ghost()
-                                        .w(px(20.))
-                                        .h(px(20.))
-                                        .p_0()
-                                        .tooltip(self.t("remove_record"))
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
-                                                if let Some(Modal::Transfer {
-                                                    phase: TransferPhase::Review,
-                                                    records,
-                                                    ..
-                                                }) = &mut this.modal
-                                                {
-                                                    records.retain(|task| task.id != id);
-                                                    cx.notify();
-                                                }
-                                            }),
-                                        ),
                                     ),
                             )
-                            .into_any_element()
+                            .when_some(retry_record, |row, retry_record| {
+                                row.child(
+                                    self.button(
+                                        ("retry-batch-item", id.as_u128() as u64),
+                                        self.t("retry"),
+                                    )
+                                    .ghost()
+                                    .on_click(cx.listener(
+                                        move |this, _, w, cx| {
+                                            this.retry_transfer(retry_record.clone(), w, cx)
+                                        },
+                                    )),
+                                )
+                            })
+                            .when(*phase == TransferPhase::Review, |row| {
+                                row.child(
+                                    self.button(
+                                        ("remove-transfer-target", id.as_u128() as u64),
+                                        "",
+                                    )
+                                    .icon(IconName::Close)
+                                    .ghost()
+                                    .w(px(20.))
+                                    .h(px(20.))
+                                    .p_0()
+                                    .tooltip(self.t("remove_record"))
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| {
+                                            if let Some(Modal::Transfer {
+                                                phase: TransferPhase::Review,
+                                                records,
+                                                ..
+                                            }) = &mut this.modal
+                                            {
+                                                records.retain(|task| task.id != id);
+                                                cx.notify();
+                                            }
+                                        },
+                                    )),
+                                )
+                            })
                     }),
                 ));
                 let current_batch = *batch;
