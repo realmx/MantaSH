@@ -85,7 +85,7 @@ fn polling_is_throttled() {
     assert_eq!(follow_up.poll(&probe, start), FollowUp::Waiting);
     probe.leave_leftovers();
     assert_eq!(
-        follow_up.poll(&probe, start + Duration::from_millis(10)),
+        follow_up.poll(&probe, start + POLL_INTERVAL / 2),
         FollowUp::Waiting
     );
     assert!(probe.hung_up.borrow().is_empty());

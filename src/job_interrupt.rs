@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 /// program that handles the interrupt and keeps running is then left alone.
 pub const FOLLOW_UP_WINDOW: Duration = Duration::from_secs(10);
 /// Minimum spacing between foreground-group checks while an interrupt is pending.
-pub const POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// Keeps the follow-up ahead of a command typed into another tab right after
+/// the prompt returns; `tcgetpgrp` is only polled while an interrupt is pending.
+pub const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Operating-system queries and the single signal used by [`InterruptFollowUp`].
 pub trait JobProbe {
