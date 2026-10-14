@@ -171,11 +171,11 @@ def main():
                 assert footer["y"] >= viewport["y"] + viewport["height"] - 1
                 assert state["modal_scroll"]["max_x"] <= 1
                 geometry = state["transfer_view"]["geometry"]
-                assert geometry["source_path"]["width"] > 100, geometry
-                assert geometry["row"]["height"] < 180, geometry
+                assert geometry["name"]["width"] > 100, geometry
+                assert geometry["row"]["height"] < 48, geometry
                 assert state["modal_scroll"]["max_y"] < 100, state["modal_scroll"]
                 baseline = content["height"]
-                checks.append(f"{ui}px {'download' if download else 'upload'} review keeps fixed footer and endpoint columns")
+                checks.append(f"{ui}px {'download' if download else 'upload'} review keeps fixed footer and one-line rows")
 
                 driver.action("transfer_fixture", confirm_upload=True, download=download, long_path=True,
                               unicode=download)
@@ -185,13 +185,14 @@ def main():
                     lambda state: state["modal"] == "transfer"
                     and state["transfer_view"] and state["transfer_view"]["endpoints"]
                     and state["modal_scroll"]["content_bounds"]
-                    and state["modal_scroll"]["content_bounds"]["height"] > baseline + 24
+                    and abs(state["modal_scroll"]["content_bounds"]["height"] - baseline) <= 1
                     and state["modal_scroll"]["max_x"] <= 1,
-                    f"{ui}px long {'download' if download else 'upload'} paths wrap",
+                    f"{ui}px long {'download' if download else 'upload'} names stay on one row",
                 )
+                assert long_view["transfer_view"]["geometry"]["row"]["height"] < 48, long_view["transfer_view"]["geometry"]
                 if download:
                     assert "中文长文件名" in long_view["transfer_view"]["endpoints"][0]["name"]
-                checks.append(f"{ui}px {'download' if download else 'upload'} long paths wrap inside list")
+                checks.append(f"{ui}px {'download' if download else 'upload'} long names truncate on one row")
 
         driver.action("font_sizes", ui=14, terminal=12)
         driver.action("theme", night=False)
