@@ -12,6 +12,7 @@ pub mod events;
 pub mod file_selection;
 pub mod files;
 pub mod integration;
+pub mod job_interrupt;
 pub mod layout;
 pub mod model;
 pub mod monitor;

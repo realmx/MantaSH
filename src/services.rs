@@ -361,6 +361,12 @@ impl Backend {
                     }
                 }
             });
+            let probe = crate::job_interrupt::PtyProbe::new(fd);
+            // The shell is a session leader, so its PID is also its process group.
+            let mut interrupt = child
+                .process_id()
+                .and_then(|pid| i32::try_from(pid).ok())
+                .map(crate::job_interrupt::InterruptFollowUp::new);
             let mut pending = None;
             'io: loop {
                 let (alive, idle) =
@@ -368,10 +374,16 @@ impl Backend {
                 if !alive {
                     break;
                 }
+                if let Some(interrupt) = interrupt.as_mut() {
+                    interrupt.poll(&probe, Instant::now());
+                }
                 let command = pending.take().or_else(|| command_rx.try_recv().ok());
                 if let Some(command) = command {
                     match command {
                         Command::Input(data) => {
+                            if let Some(interrupt) = interrupt.as_mut() {
+                                interrupt.input(&data, &probe, Instant::now());
+                            }
                             if writer
                                 .write_all(&data)
                                 .and_then(|_| writer.flush())

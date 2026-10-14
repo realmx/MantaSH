@@ -109,6 +109,206 @@ fn actual_shell_io_resize_and_close() {
     backend.shutdown();
 }
 
+#[cfg(unix)]
+struct InteractiveBash {
+    backend: Backend,
+    owner: Owner,
+    session: std::sync::Arc<mantash::services::Session>,
+    dir: tempfile::TempDir,
+}
+
+#[cfg(unix)]
+impl InteractiveBash {
+    fn start() -> Option<Self> {
+        let bash = std::path::Path::new("/bin/bash");
+        if !bash.exists() {
+            eprintln!("skipping: /bin/bash is unavailable");
+            return None;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (backend, events, _, _) = Backend::initialize_in(dir.path().into()).unwrap();
+        let owner = Owner::new();
+        let session = backend.start(
+            owner,
+            SessionSpec::Local {
+                shell: bash.to_string_lossy().into_owned(),
+                directory: dir.path().to_string_lossy().into_owned(),
+                encoding: Encoding::Utf8,
+            },
+            zeroize::Zeroizing::new(String::new()),
+            false,
+        );
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            assert!(Instant::now() < deadline, "bash PTY did not start");
+            match events.try_recv() {
+                Ok(Event::State(o, ConnectionState::Connected)) if o == owner => break,
+                Ok(Event::State(_, ConnectionState::Failed(error))) => panic!("{error}"),
+                _ => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
+        let shell = Self {
+            backend,
+            owner,
+            session,
+            dir,
+        };
+        shell.run_and_wait("READY");
+        Some(shell)
+    }
+
+    /// Run `printf` through the shell and wait for its output, proving the
+    /// prompt accepted a new command.
+    fn run_and_wait(&self, marker: &str) {
+        let (head, tail) = marker.split_at(marker.len() / 2);
+        self.session
+            .input(format!("printf '\\n%s%s\\n' {head} {tail}\r").into_bytes());
+        assert!(
+            wait_until(Duration::from_secs(10), || self
+                .session
+                .terminal
+                .lock()
+                .search(marker)
+                > 0),
+            "shell did not run a command after {marker}"
+        );
+    }
+
+    fn pid_file(&self, name: &str) -> i32 {
+        let path = self.dir.path().join(name);
+        let mut pid = None;
+        assert!(
+            wait_until(Duration::from_secs(10), || {
+                pid = std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| text.trim().parse().ok());
+                pid.is_some()
+            }),
+            "{name} was not written"
+        );
+        pid.unwrap()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for InteractiveBash {
+    fn drop(&mut self) {
+        self.backend.close(self.owner);
+        self.backend.shutdown();
+    }
+}
+
+fn wait_until(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if condition() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    condition()
+}
+
+/// Zombies awaiting their reaper count as exited.
+#[cfg(unix)]
+fn process_running(pid: i32) -> bool {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    let state = String::from_utf8_lossy(&output.stdout);
+    let state = state.trim();
+    !state.is_empty() && !state.starts_with('Z')
+}
+
+#[cfg(unix)]
+fn process_stopped(pid: i32) -> bool {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .starts_with('T')
+}
+
+/// A pnpm-style wrapper whose `&` child ignores SIGINT, as every async child of
+/// a non-interactive `sh -c` does, must not keep running after Ctrl+C.
+#[cfg(unix)]
+#[test]
+fn ctrl_c_stops_the_foreground_job_and_its_leftover_members() {
+    let Some(shell) = InteractiveBash::start() else {
+        return;
+    };
+    shell.session.input(
+        b"sh -c 'sleep 1000 & echo $! > bg.pid; sh -c \"echo \\$\\$ > fg.pid; exec sleep 1000\"'\r"
+            .to_vec(),
+    );
+    let background = shell.pid_file("bg.pid");
+    let foreground = shell.pid_file("fg.pid");
+    assert!(process_running(background) && process_running(foreground));
+    shell.session.input(vec![3]);
+    assert!(
+        wait_until(Duration::from_secs(5), || !process_running(foreground)),
+        "SIGINT did not reach the foreground process group"
+    );
+    let stopped = wait_until(Duration::from_secs(5), || !process_running(background));
+    if !stopped {
+        unsafe { libc::kill(background, libc::SIGKILL) };
+    }
+    assert!(stopped, "the interrupted job left a member running");
+    shell.run_and_wait("AFTER_INTERRUPT");
+}
+
+#[cfg(unix)]
+#[test]
+fn ctrl_c_follow_up_keeps_nohup_processes() {
+    let Some(shell) = InteractiveBash::start() else {
+        return;
+    };
+    shell.session.input(
+        b"sh -c 'nohup sleep 1000 >/dev/null 2>&1 & echo $! > bg.pid; sleep 1000'\r".to_vec(),
+    );
+    let background = shell.pid_file("bg.pid");
+    std::thread::sleep(Duration::from_millis(200));
+    shell.session.input(vec![3]);
+    shell.run_and_wait("AFTER_NOHUP_INTERRUPT");
+    std::thread::sleep(Duration::from_millis(500));
+    let running = process_running(background);
+    unsafe { libc::kill(background, libc::SIGKILL) };
+    assert!(
+        running,
+        "a nohup process was terminated by the interrupt follow-up"
+    );
+}
+
+/// Ctrl+C that the job survives followed by Ctrl+Z suspends the job; the
+/// shell reclaiming the terminal must not be mistaken for the job ending.
+#[cfg(unix)]
+#[test]
+fn ctrl_z_after_a_survived_ctrl_c_keeps_the_suspended_job() {
+    let Some(shell) = InteractiveBash::start() else {
+        return;
+    };
+    shell
+        .session
+        .input(b"sh -c 'trap \"\" INT; echo $$ > fg.pid; exec sleep 1000'\r".to_vec());
+    let job = shell.pid_file("fg.pid");
+    std::thread::sleep(Duration::from_millis(200));
+    shell.session.input(vec![3]);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(process_running(job), "the job should ignore SIGINT");
+    shell.session.input(vec![0x1a]);
+    let suspended = wait_until(Duration::from_secs(5), || process_stopped(job));
+    shell.run_and_wait("AFTER_SUSPEND");
+    std::thread::sleep(Duration::from_millis(500));
+    let stopped = process_stopped(job);
+    unsafe {
+        libc::kill(job, libc::SIGKILL);
+    }
+    assert!(suspended && stopped, "the suspended job was signalled");
+}
+
 /// The zsh integration must keep the user's real HISTFILE: /etc/zshrc derives
 /// it from the overridden ZDOTDIR, and without the restore the terminal neither
 /// loads ~/.zsh_history nor appends new commands to it.
