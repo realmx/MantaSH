@@ -176,6 +176,29 @@ fn a_program_that_survives_the_interrupt_is_released_after_the_window() {
 }
 
 #[test]
+fn the_follow_up_window_is_three_seconds() {
+    assert_eq!(FOLLOW_UP_WINDOW, Duration::from_secs(3));
+    let start = Instant::now();
+
+    let probe = Fake::new();
+    let mut follow_up = interrupted(&probe, start);
+    probe.leave_leftovers();
+    assert_eq!(
+        follow_up.poll(&probe, start + Duration::from_millis(2900)),
+        FollowUp::HungUp(JOB)
+    );
+
+    let probe = Fake::new();
+    let mut follow_up = interrupted(&probe, start);
+    probe.leave_leftovers();
+    assert_eq!(
+        follow_up.poll(&probe, start + Duration::from_millis(3100)),
+        FollowUp::Released
+    );
+    assert!(probe.hung_up.borrow().is_empty());
+}
+
+#[test]
 fn a_repeated_interrupt_restarts_the_window() {
     let probe = Fake::new();
     let start = Instant::now();

@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 /// The interrupted group must leave the foreground within this window. A
 /// program that handles the interrupt and keeps running is then left alone.
-pub const FOLLOW_UP_WINDOW: Duration = Duration::from_secs(10);
+pub const FOLLOW_UP_WINDOW: Duration = Duration::from_secs(3);
 /// Minimum spacing between foreground-group checks while an interrupt is pending.
 /// Keeps the follow-up ahead of a command typed into another tab right after
 /// the prompt returns; `tcgetpgrp` is only polled while an interrupt is pending.
