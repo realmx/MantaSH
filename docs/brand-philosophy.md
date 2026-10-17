@@ -12,10 +12,10 @@
 
 ## 资源与平台表现
 
-`scripts/generate_logo.py` 是品牌几何与配色的唯一来源，同时生成彩色、单色、黑色、白色 SVG，以及文档 PNG、Windows ICO 和 macOS ICNS。透明 SVG 使用收紧的 48 单位视框，带底图标使用完整 64 单位画布。完整命令和资源链接见[设计规范](design.md#品牌资源)。
+`scripts/generate_logo.py` 是品牌几何与配色的唯一来源，只生成实际使用的四个品牌文件：界面单色 SVG、128px 文档 PNG、Windows ICO 和 macOS ICNS。单色 SVG 使用收紧的 48 单位视框，带底图标使用完整 64 单位画布。完整命令和资源链接见[设计规范](design.md#品牌资源)。
 
-macOS 专用 PNG 与 ICNS 使用铺满画布的不透明深蓝底色，不预留透明外圈，也不预先裁圆角，由系统处理原生图标轮廓。Windows ICO、文档使用的 128px PNG 和带底 SVG 使用圆角深蓝底；图形的颜色、比例与居中方式一致。
+macOS ICNS 使用铺满画布的不透明深蓝底色，不预留透明外圈，也不预先裁圆角，由系统处理原生图标轮廓。Windows ICO 和文档使用的 128px PNG 使用圆角深蓝底；图形的颜色、比例与居中方式一致。
 
-运行 `python3 scripts/generate_logo.py --macos-only` 只生成 `assets/mantash-macos-1024.png` 和 `assets/mantash.icns`；不带参数则生成完整品牌资源。macOS 打包通过 `CFBundleIconFile=mantash.icns` 引用 ICNS，Windows EXE 与安装器引用同一 ICO。
+运行 `python3 scripts/generate_logo.py --macos-only` 只生成 `assets/mantash.icns`；不带参数则生成全部四个品牌文件。macOS 打包通过 `CFBundleIconFile=mantash.icns` 引用 ICNS，Windows EXE 与安装器引用同一 ICO。应用顶栏与关于窗口的 `mantash-mark.svg` 运行时路径由资源加载器映射到 `assets/mantash-monochrome.svg`。
 
 多尺寸不透明边缘与已提交资源的一致性由 `python3 -m unittest discover -s tests -p test_logo_assets.py` 检查。独立通用 PNG 只保留文档实际使用的 `assets/mantash-128.png`，其他尺寸由 ICO/ICNS 内置表示。系统图标缓存和安装后呈现仍需平台验收，资源生成与 PNG 预览不代表安装包实机通过。

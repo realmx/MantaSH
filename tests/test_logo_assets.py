@@ -29,18 +29,32 @@ class MacIconTests(unittest.TestCase):
                     self.assertEqual(rgba.crop(edge).getextrema(),
                                      ((16, 16), (27, 27), (42, 42), (255, 255)))
 
-    def test_macos_generation_matches_checked_in_png_and_keeps_other_assets(self):
+    def test_macos_generation_matches_shipped_icns_and_keeps_other_assets(self):
         with tempfile.TemporaryDirectory() as temporary:
-            destination = Path(temporary)
+            root = Path(temporary)
+            destination = root / "assets"
+            destination.mkdir()
             other = destination / "mantash.ico"
             other.write_bytes(b"unrelated platform asset")
-            generate_logo.write_macos_icons(destination)
+            with patch.object(generate_logo, "ROOT", root), \
+                    patch.object(sys, "argv", ["generate_logo.py", "--macos-only"]):
+                generate_logo.main()
             self.assertEqual(other.read_bytes(), b"unrelated platform asset")
-            with Image.open(destination / "mantash-macos-1024.png") as generated, \
-                    Image.open(ROOT / "assets/mantash-macos-1024.png") as shipped, \
-                    Image.open(destination / "mantash.icns") as icns:
-                self.assertEqual(generated.tobytes(), shipped.convert("RGBA").tobytes())
-                self.assertEqual(generated.tobytes(), icns.convert("RGBA").tobytes())
+            self.assertEqual({path.name for path in destination.iterdir()},
+                             {"mantash.ico", "mantash.icns"})
+            with Image.open(destination / "mantash.icns") as generated, \
+                    Image.open(ROOT / "assets/mantash.icns") as shipped:
+                sizes = generated.info["sizes"]
+                self.assertEqual(sizes, shipped.info["sizes"])
+            for width, height, scale in sizes:
+                with self.subTest(size=(width, height, scale)), \
+                        Image.open(destination / "mantash.icns") as generated, \
+                        Image.open(ROOT / "assets/mantash.icns") as shipped:
+                    generated.size = shipped.size = (width, height)
+                    generated.load(scale=scale)
+                    shipped.load(scale=scale)
+                    self.assertEqual(generated.convert("RGBA").tobytes(),
+                                     shipped.convert("RGBA").tobytes())
 
     def test_full_generation_keeps_consumed_assets_and_embedded_icon_sizes(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -50,16 +64,15 @@ class MacIconTests(unittest.TestCase):
             with patch.object(generate_logo, "ROOT", root), \
                     patch.object(sys, "argv", ["generate_logo.py"]):
                 generate_logo.main()
-            self.assertEqual({path.name for path in destination.glob("*.png")},
-                             {"mantash-128.png", "mantash-macos-1024.png"})
+            self.assertEqual({path.name for path in destination.iterdir()},
+                             {"mantash-monochrome.svg", "mantash-128.png",
+                              "mantash.ico", "mantash.icns"})
             with Image.open(destination / "mantash.ico") as icon:
                 self.assertEqual(icon.info["sizes"], {(n, n) for n in (16, 24, 32, 48, 64, 128, 256)})
             with Image.open(destination / "mantash.icns") as icon:
                 self.assertEqual(icon.size, (1024, 1024))
-            for name in ("mantash.svg", "mantash-monochrome.svg", "mantash-black.svg",
-                         "mantash-white.svg", "mantash-mark.svg"):
-                self.assertEqual((destination / name).read_bytes(),
-                                 (ROOT / "assets" / name).read_bytes(), name)
+            self.assertEqual((destination / "mantash-monochrome.svg").read_bytes(),
+                             (ROOT / "assets/mantash-monochrome.svg").read_bytes())
             for name in ("mantash-128.png", "mantash.ico"):
                 with Image.open(destination / name) as generated, \
                         Image.open(ROOT / "assets" / name) as shipped:

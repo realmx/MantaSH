@@ -153,9 +153,9 @@ macOS 使用 AppKit 标准「窗口」菜单，常用平铺、居中、填满、
 
 正式名称与字标统一为 **MantaSH**（M、S、H 大写，不附加句点）。窗口标题、菜单、品牌展示和文档使用同一写法。程序、包名、文件路径和环境变量属于技术标识，遵循各自的命名规范。
 
-标识为“折峰”：四片平面折叠成字母 M，依次使用薄荷绿 `#B6F1DE`、青绿 `#58BEBA`、浅冰色 `#D6F6F0` 和淡紫 `#7F91DA`，背景为深蓝 `#101B2A`。主形占标准画布宽度的 55.8%，保持选定方案的居中与留白。原生顶栏和关于窗口使用随主题着色的单色外轮廓；[透明彩色标识](../assets/mantash-mark.svg) 与单色版本使用收紧的视框，以维持小尺寸识别度。
+标识为“折峰”：四片平面折叠成字母 M，依次使用薄荷绿 `#B6F1DE`、青绿 `#58BEBA`、浅冰色 `#D6F6F0` 和淡紫 `#7F91DA`，背景为深蓝 `#101B2A`。主形占标准画布宽度的 55.8%，保持选定方案的居中与留白。原生顶栏和关于窗口使用随主题着色的单色外轮廓，通过收紧视框维持小尺寸识别度。
 
-资源包括[带底彩色 SVG](../assets/mantash.svg)、[单色 SVG](../assets/mantash-monochrome.svg)、[黑色版](../assets/mantash-black.svg)、[白色版](../assets/mantash-white.svg)、128px 文档 PNG、1024px macOS PNG、[ICO](../assets/mantash.ico) 与 [ICNS](../assets/mantash.icns)。ICO 内置 16/24/32/48/64/128/256px 表示，ICNS 内置平台多尺寸表示。macOS 图标铺满不透明深蓝背景、由系统处理轮廓；Windows ICO、文档 PNG 和带底 SVG 使用圆角背景。
+正式品牌资源只有四个文件：[界面单色 SVG](../assets/mantash-monochrome.svg)、[128px 文档 PNG](../assets/mantash-128.png)、[Windows ICO](../assets/mantash.ico) 与 [macOS ICNS](../assets/mantash.icns)。ICO 内置 16/24/32/48/64/128/256px 表示，ICNS 内置平台多尺寸表示；不另外输出备用色版或预览 PNG。macOS 图标铺满不透明深蓝背景、由系统处理轮廓；Windows ICO 和文档 PNG 使用圆角背景。界面操作图标另由组件库及 `assets/icons/` 提供，命令历史执行按钮使用 `assets/mantash-play.svg`。
 
 ![MantaSH](../assets/mantash-128.png)
 
