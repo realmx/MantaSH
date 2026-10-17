@@ -91,6 +91,23 @@ MantaSH 首个公开产品版本，包含：
 
 ### 2026-10-17
 
+- **补齐完整更新日志并自动同步每次 master 提交** · [0f6e6c2](https://github.com/realmx/MantaSH/commit/0f6e6c22c32dc074fd056bb7983bc2dd9e63c9c7)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+按现有源码 tag 补齐终端清屏与缩放、进程命令搜索、容量限制、SSH 安全依赖、传输进度和原生功能摘要，纠正旧条目的版本归属；保留历史发布与平台验收边界，并生成现有 40 条完整提交记录。
+
+新增更新日志生成器及 master push/workflow_dispatch 自动化，记录全部可达提交的标题、正文、日期和链接，保留手写摘要。通过隔离检出和非强制推送同步，处理并发提交、重复运行和服务端拒绝；只排除专用尾注标识的单亲日志同步提交，不递归触发 workflow 或创建发布版本。
+
+同步贡献、开发、发布和 AI 维护规范，将针对性测试接入 CI。提交正文中的合法空白、代码围栏和冲突标记按原文保存，不阻止日志同步。
+
+验证：14 项真实临时 Git 仓库专项、154 项核心测试（1 个显式 fixture ignored）、5 项文档测试和 35 项发布脚本测试通过；格式、核心编译、Python 与 YAML 语法、22 个必需文档及 240 个链接/锚点、完整历史覆盖与重复生成检查通过。未新增原生 UI、Windows 实机或安装包验收。
+```
+
+</details>
+
 - **补充 README 黑夜截图更新日志** · [f23b516](https://github.com/realmx/MantaSH/commit/f23b5166bf18636c62ed3fa7f2cef28e509b8f04)
 
 <details>

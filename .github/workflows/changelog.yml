@@ -18,7 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      TMPDIR: ${{ runner.temp }}
     steps:
       - name: Check out current master with complete history
         uses: actions/checkout@v4
@@ -27,8 +26,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
       - name: Test changelog generation and publication
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: python3 -m unittest discover -s tests -p 'test_changelog.py'
       - name: Generate, validate and publish the commit log
+        env:
+          TMPDIR: ${{ runner.temp }}
         # GITHUB_TOKEN pushes do not recursively trigger workflows. The generator
         # also excludes its marked log-only commit, making reruns a no-op.
         run: python3 scripts/update_changelog.py publish
