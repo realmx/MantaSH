@@ -116,6 +116,44 @@ mod native {
         })
     }
 
+    /// Exercise a complete settings-switch key cycle on this exact QA window.
+    #[cfg(debug_assertions)]
+    #[allow(unexpected_cfgs)]
+    pub(crate) fn prepare_test_key_cycle(
+        window: &Window,
+        key: &str,
+    ) -> anyhow::Result<TestGesture> {
+        use cocoa::appkit::{NSEvent, NSEventModifierFlags, NSEventType};
+        use cocoa::base::NO;
+        use objc::class;
+        let (text, key_code) = match key {
+            "space" => (" ", 49),
+            "enter" => ("\r", 36),
+            _ => anyhow::bail!("Only Space and Enter support native QA key cycles"),
+        };
+        let native = handle(window)?;
+        let mut events = Vec::new();
+        // SAFETY: The opt-in QA driver targets its own retained NSWindow, with fixed
+        // non-text switch keys and no global keyboard or accessibility injection.
+        unsafe {
+            let number: i64 = msg_send![native, windowNumber];
+            let process: id = msg_send![class!(NSProcessInfo), processInfo];
+            let timestamp: f64 = msg_send![process, systemUptime];
+            let text = NSString::alloc(nil).init_str(text);
+            for kind in [NSEventType::NSKeyDown, NSEventType::NSKeyUp] {
+                let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode_(
+                    nil, kind, NSPoint::new(0., 0.), NSEventModifierFlags::empty(), timestamp,
+                    number, nil, text, text, NO, key_code);
+                events.push(StrongPtr::retain(event));
+            }
+            let _: () = msg_send![text, release];
+        }
+        Ok(TestGesture {
+            window: unsafe { StrongPtr::retain(native) },
+            events,
+        })
+    }
+
     /// Retained fixture input is delivered after the owning GPUI update has finished.
     #[cfg(debug_assertions)]
     pub(crate) struct TestGesture {
@@ -175,37 +213,6 @@ mod native {
             }
         }
     }
-    /// Ask AppKit to show its standard About panel, with version metadata for unbundled debug runs.
-    #[allow(unexpected_cfgs)]
-    pub(crate) fn show_about() -> anyhow::Result<()> {
-        #[allow(non_upper_case_globals)]
-        #[link(name = "AppKit", kind = "framework")]
-        unsafe extern "C" {
-            static NSAboutPanelOptionApplicationName: id;
-            static NSAboutPanelOptionApplicationVersion: id;
-        }
-        unsafe {
-            let app = NSApp();
-            anyhow::ensure!(app != nil, "Application is unavailable");
-            let options: id = msg_send![objc::class!(NSMutableDictionary), dictionary];
-            let name = NSString::alloc(nil).init_str("MantaSH");
-            let version = NSString::alloc(nil).init_str(crate::APP_VERSION);
-            let copyright_key =
-                NSString::alloc(nil).init_str("NSAboutPanelOptionApplicationCopyright");
-            let copyright = NSString::alloc(nil)
-                .init_str("作者：Realm · GitHub: https://github.com/realmx/MantaSH");
-            let _: () = msg_send![options, setObject:name forKey:NSAboutPanelOptionApplicationName];
-            let _: () =
-                msg_send![options, setObject:version forKey:NSAboutPanelOptionApplicationVersion];
-            let _: () = msg_send![options, setObject:copyright forKey:copyright_key];
-            let _: () = msg_send![app, orderFrontStandardAboutPanelWithOptions:options];
-            let _: () = msg_send![copyright_key, release];
-            let _: () = msg_send![copyright, release];
-            let _: () = msg_send![name, release];
-            let _: () = msg_send![version, release];
-        }
-        Ok(())
-    }
 
     /// Read the actual AppKit application menu in an isolated native QA run.
     #[cfg(debug_assertions)]
@@ -241,75 +248,6 @@ mod native {
                 .collect();
             serde_json::json!({"registered":true,"items":items})
         }
-    }
-
-    /// Inspect only this application's visible standard About panel in the isolated native QA process.
-    #[cfg(debug_assertions)]
-    #[allow(unexpected_cfgs)]
-    fn about_panel() -> Option<id> {
-        unsafe {
-            let windows: id = msg_send![NSApp(), windows];
-            let count: usize = msg_send![windows, count];
-            (0..count).find_map(|index| {
-                let panel: id = msg_send![windows, objectAtIndex:index];
-                let visible: bool = msg_send![panel, isVisible];
-                let native_panel: bool = msg_send![panel, isKindOfClass:objc::class!(NSPanel)];
-                if !visible || !native_panel {
-                    return None;
-                }
-                let content: id = msg_send![panel, contentView];
-                (content != nil && panel_version(content, 0)).then_some(panel)
-            })
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    #[allow(unexpected_cfgs)]
-    fn panel_version(view: id, depth: usize) -> bool {
-        if depth > 16 {
-            return false;
-        }
-        unsafe {
-            let text_field: bool = msg_send![view, isKindOfClass:objc::class!(NSTextField)];
-            if text_field {
-                let value: id = msg_send![view, stringValue];
-                if value != nil
-                    && std::ffi::CStr::from_ptr(value.UTF8String())
-                        .to_string_lossy()
-                        .contains(crate::APP_VERSION)
-                {
-                    return true;
-                }
-            }
-            let children: id = msg_send![view, subviews];
-            let count: usize = msg_send![children, count];
-            (0..count).any(|index| {
-                let child: id = msg_send![children, objectAtIndex:index];
-                panel_version(child, depth + 1)
-            })
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    #[allow(unexpected_cfgs)]
-    pub(crate) fn about_panel_snapshot() -> serde_json::Value {
-        let Some(panel) = about_panel() else {
-            return serde_json::json!({"visible": false});
-        };
-        unsafe {
-            let content: id = msg_send![panel, contentView];
-            serde_json::json!({"visible": true, "version_visible": panel_version(content, 0)})
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    #[allow(unexpected_cfgs)]
-    pub(crate) fn close_about_panel() -> anyhow::Result<()> {
-        let panel = about_panel().ok_or_else(|| anyhow::anyhow!("About panel is not visible"))?;
-        unsafe {
-            let _: () = msg_send![panel, performClose:nil];
-        }
-        Ok(())
     }
 
     #[cfg(debug_assertions)]
@@ -679,13 +617,11 @@ mod native {
 #[cfg(target_os = "windows")]
 pub(crate) use native::prepare_about;
 #[cfg(all(target_os = "macos", debug_assertions))]
-pub(crate) use native::prepare_test_gesture;
-#[cfg(all(target_os = "macos", debug_assertions))]
 pub(crate) use native::system_menu_snapshot;
 #[cfg(all(target_os = "macos", debug_assertions))]
-pub(crate) use native::{
-    about_panel_snapshot, application_menu_snapshot, close_about_panel, prepare_about_menu,
-};
+pub(crate) use native::{application_menu_snapshot, prepare_about_menu};
 pub(crate) use native::{info, prepare};
 #[cfg(target_os = "macos")]
-pub(crate) use native::{install_system_menu, prepare_system_menu, show_about};
+pub(crate) use native::{install_system_menu, prepare_system_menu};
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub(crate) use native::{prepare_test_gesture, prepare_test_key_cycle};

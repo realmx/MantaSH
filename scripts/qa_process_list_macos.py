@@ -19,9 +19,10 @@ def draw(driver):
 
 
 def assert_frame(state):
-    """The table must stay centered and within the existing 640px modal width."""
+    """The table stays centered at its font-aware width within the viewport."""
     frame = state["dialog_frame_bounds"]
-    assert abs(frame["width"] + 2 - 640) <= 1, frame
+    width = min(640 + max(state["preferences"]["ui_size"] - 14, 0) * 16, state["width"] - 32)
+    assert abs(frame["width"] + 2 - width) <= 1, frame
     assert abs(frame["x"] + frame["width"] / 2 - state["width"] / 2) <= 1, frame
     assert abs(frame["y"] + frame["height"] / 2 - state["height"] / 2) <= 1, frame
 

@@ -198,7 +198,7 @@ impl Workbench {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let info = window_native::info(window, cx).ok();
         let disabled = window.is_fullscreen() || self.window_change.is_some();
         let positions_disabled = disabled || info.is_none_or(|info| !info.positioning);
@@ -295,6 +295,7 @@ impl Workbench {
                             )
                             .child(
                                 self.button("apply-window-size", self.t("apply"))
+                                    .primary()
                                     .disabled(disabled)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.apply_custom_window(window, cx)

@@ -192,6 +192,9 @@ impl Workbench {
             {
                 bounds.origin += self.tab_strip.scroll.offset();
                 if bounds.contains(&pointer) {
+                    if self.active != index {
+                        self.invalidate_commit_navigation();
+                    }
                     self.active = index;
                     self.focus_active(window, cx);
                     self.changed(cx);

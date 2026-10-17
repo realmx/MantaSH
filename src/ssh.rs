@@ -165,7 +165,7 @@ pub async fn connect_with_store(
     owner: Owner,
     profile: Profile,
     mut secret: zeroize::Zeroizing<String>,
-    mut remember: bool,
+    remember: bool,
     db: Arc<Mutex<Database>>,
     events: async_channel::Sender<Event>,
     cancel: CancellationToken,
@@ -203,7 +203,7 @@ pub async fn connect_with_store(
     }
     let mut prompt = None;
     let mut persist_secret = remember;
-    if secret.is_empty() {
+    if secret.is_empty() && remember {
         let id = profile.id;
         let reader = store.clone();
         let loaded = tokio::select! {
@@ -213,7 +213,6 @@ pub async fn connect_with_store(
         match loaded {
             Ok(Some(saved)) => {
                 secret = saved;
-                remember = true;
                 persist_secret = false;
             }
             Ok(None) => {}
@@ -223,12 +222,14 @@ pub async fn connect_with_store(
             prompt = Some(PromptReason::Missing);
         }
     }
+    if secret.is_empty() && prompt.is_none() {
+        prompt = Some(PromptReason::Missing);
+    }
     loop {
         if let Some(reason) = prompt.take() {
             let response = request_credentials(owner, reason, remember, &events, &cancel).await?;
             secret = response.secret;
-            remember = response.remember;
-            persist_secret = remember;
+            persist_secret = remember && response.remember;
         }
         if cancel.is_cancelled() {
             bail!("Connection cancelled");

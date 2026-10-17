@@ -73,6 +73,13 @@ class Driver:
         return self.wait(lambda state: state["overview"]["revision"] >= previous + 4,
                          "four fresh overview card measurements")
 
+    def draw_dialog(self):
+        """Require a new modal prepaint, independent of any overview fixture."""
+        previous = self.action("snapshot")["dialog_revision"]
+        self.action("draw")
+        return self.wait(lambda state: state["dialog_revision"] > previous
+                         and state["dialog_frame_bounds"], "fresh dialog measurement")
+
 
 def main():
     """Launch only a supplied debug binary, retain all QA data, and quit through its own driver."""
@@ -104,17 +111,15 @@ def main():
                 bounds = state["overview"]["bounds"]
                 assert state["overview"]["fixture"] and set(bounds) == {"cpu", "memory", "disk", "network"}
                 assert all(0 < box["height"] <= max(300, ui * 20) for box in bounds.values()), bounds
-                # Full-bleed modules (2026-09-20 redesign) fill the tool panel;
-                # the measuring canvas also covers the 1px panel divider.
-                assert all(abs(box["width"] - state["tool_width"]) <= 2 for box in bounds.values()), bounds
+                # Measure the actual sections, without adding a nonexistent border.
+                assert all(abs(box["width"] - state["tool_width"]) <= 1 for box in bounds.values()), bounds
                 assert all(box["x"] >= 0 and box["x"] + box["width"] <= width + 1 for box in bounds.values()), bounds
                 ordered = [bounds[key] for key in ("cpu", "memory", "disk", "network")]
                 assert all(abs(box["x"] - ordered[0]["x"]) < 2 for box in ordered), bounds
                 for first, second in zip(ordered, ordered[1:]):
-                    # Modules abut with the shared 1px separator line (2026-09-20
-                    # full-bleed redesign) instead of an 8px gap.
+                    # Adjacent content sections retain the shared 1px separator.
                     gap = second["y"] - first["y"] - first["height"]
-                    assert -1.5 < gap < 0.5, bounds
+                    assert -0.5 <= gap <= 1.5, bounds
                 assert all(bounds[key]["height"] <= max(100, ui * 4 + 40)
                            for key in ("cpu", "disk")), bounds
                 if panel is None:

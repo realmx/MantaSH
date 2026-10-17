@@ -64,16 +64,12 @@ brew upgrade --cask mantash
 
 ## 本地检查
 
-不跨平台模拟 Windows 安装器或 macOS DMG。发布前可运行：
+先执行[基础检查](development.md#必做检查)，发布脚本另需以下验证；版本参数替换为实际目标版本。不跨平台模拟 Windows 安装器或 macOS DMG。
 
 ```sh
-cargo fmt --all -- --check
-cargo test --locked --no-default-features --all-targets
-cargo check --locked --no-default-features --all-targets
-python3 scripts/release_version.py validate --version 1.0.0
+python3 scripts/release_version.py validate --version X.Y.Z
 python3 -m py_compile scripts/package_release.py scripts/verify_macos_dmg.py scripts/release_version.py scripts/release_matrix.py scripts/release_notes.py scripts/update_homebrew_cask.py
 python3 -m unittest discover -s tests -p 'test_release_*.py'
-python3 scripts/check_docs.py
 ```
 
 macOS 可在 `cargo build --locked --release --target aarch64-apple-darwin --bin mantash` 后运行下列本机打包检查；这不代表 x64、Windows 或 GitHub runner 已通过。Windows 打包需目标二进制和 Inno Setup 6。
@@ -81,7 +77,7 @@ macOS 可在 `cargo build --locked --release --target aarch64-apple-darwin --bin
 ```sh
 python3 scripts/package_release.py --target aarch64-apple-darwin \
   --binary target/aarch64-apple-darwin/release/mantash \
-  --version 1.0.0 --output-dir dist
+  --version X.Y.Z --output-dir dist
 ```
 
 不要提交 `.pi/`、`.zcode/`、`target/`、`dist/`、数据库、凭据或临时日志；平台人工结果单独登记在[验收状态](acceptance.md)。

@@ -87,7 +87,7 @@ class ReleaseVersionTests(unittest.TestCase):
         self.assertTrue(release_version.documentation_only(docs))
         self.assertFalse(release_version.documentation_only([]))
         for path in ("src/main.rs", "scripts/release_version.py", ".github/workflows/version.yml",
-                     "Cargo.toml", "docs/dependency-licenses.csv", "examples/connections.csv",
+                     "Cargo.toml", "docs/dependency-licenses.csv", "packaging/windows/MantaSH.iss",
                      "assets/icons/save.svg", "vendor/taffy-compat/README.md"):
             with self.subTest(path=path):
                 self.assertFalse(release_version.documentation_only(docs + [path]))

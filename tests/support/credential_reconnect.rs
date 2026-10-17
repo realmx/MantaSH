@@ -89,7 +89,7 @@ mod checks {
             Owner::new(),
             profile,
             Zeroizing::new(String::new()),
-            false,
+            true,
             db,
             sender,
             cancel,
@@ -106,6 +106,51 @@ mod checks {
             .unwrap()
             .unwrap()
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn disabled_policy_never_reads_or_saves_even_if_a_reply_requests_it() {
+        for supplied in [false, true] {
+            let fixture = Fixture::new().await;
+            let store = Arc::new(Store::default());
+            *store.value.lock() = Some(Zeroizing::new("previous-secret".into()));
+            let (sender, events) = async_channel::unbounded();
+            let task = tokio::spawn(ssh::connect_with_store(
+                Owner::new(),
+                fixture.profile.clone(),
+                Zeroizing::new(if supplied {
+                    fixture.password.clone()
+                } else {
+                    String::new()
+                }),
+                false,
+                Arc::new(Mutex::new(Database::memory().unwrap())),
+                sender,
+                CancellationToken::new(),
+                store.clone(),
+            ));
+            approve(&events).await;
+            if !supplied {
+                let (_, remember, reply) = prompt(&events, PromptReason::Missing).await;
+                assert!(!remember);
+                assert!(
+                    reply
+                        .send(CredentialReply {
+                            secret: Zeroizing::new(fixture.password.clone()),
+                            remember: true
+                        })
+                        .is_ok()
+                );
+            }
+            let remote = finish(task).await;
+            assert_eq!(store.reads.load(Ordering::SeqCst), 0);
+            assert_eq!(store.writes.load(Ordering::SeqCst), 0);
+            assert_eq!(
+                store.value.lock().as_ref().unwrap().as_str(),
+                "previous-secret"
+            );
+            remote.cancel.cancel();
+        }
     }
 
     #[tokio::test]
@@ -129,7 +174,7 @@ mod checks {
             }
         }
         let (_, remember, reply) = prompt(&events, PromptReason::Missing).await;
-        assert!(!remember);
+        assert!(remember);
         assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
         assert!(
             reply
@@ -354,7 +399,7 @@ mod checks {
         let cancel = CancellationToken::new();
         let (task, events) = start(&fixture, fixture.profile.clone(), db, store, cancel.clone());
         let (_, remember, reply) = prompt(&events, PromptReason::Missing).await;
-        assert!(!remember);
+        assert!(remember); // A new attempt uses its own policy; the previous reply saved nothing.
         cancel.cancel();
         drop(reply);
         assert!(task.await.unwrap().is_err());

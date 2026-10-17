@@ -7,6 +7,7 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub mod command_cursor;
 pub mod connections;
 pub mod credentials;
+pub mod editor_format;
 pub mod encoding;
 pub mod events;
 pub mod file_selection;

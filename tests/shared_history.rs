@@ -1,73 +1,52 @@
-//! Shared SSH history includes old sources after restart, without mixing local or unknown records.
+//! Stable shared SSH history and frozen visible selection, independent of host metadata.
 use mantash::{model::*, storage::Database};
 use std::collections::HashSet;
 
 #[test]
-fn legacy_ssh_origins_share_a_list_after_database_reload() {
+fn stable_identities_and_membership_survive_reload_and_delete() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("data");
-    let source_a = Id::new_v4();
-    let source_b = Id::new_v4();
-    let entries = [
-        HistoryEntry {
-            id: Id::new_v4(),
-            scope: format!("ssh:{source_a}"),
-            command: "git status".into(),
-            timestamp: 20,
-        },
-        HistoryEntry {
-            id: Id::new_v4(),
-            scope: format!("ssh:{source_b}"),
-            command: "kubectl get pods".into(),
-            timestamp: 30,
-        },
-        HistoryEntry {
-            id: Id::new_v4(),
-            scope: "local".into(),
-            command: "local-only".into(),
-            timestamp: 40,
-        },
-    ];
-    {
-        let database = Database::open(&path).unwrap();
-        for entry in &entries {
-            database.touch_history(entry).unwrap();
-        }
-    }
-    let mut database = Database::open(&path).unwrap();
-    let snapshot = database.load().unwrap();
-    let shared = snapshot
-        .history
-        .iter()
-        .filter(|entry| HistoryScope::Ssh.includes(&entry.scope))
-        .collect::<Vec<_>>();
+    let mut db = Database::open(directory.path()).unwrap();
+    let first = db
+        .record_history(HistoryScope::Ssh, " git status ")
+        .unwrap()
+        .items[0]
+        .id;
+    let second = db
+        .record_history(HistoryScope::Ssh, "kubectl get pods")
+        .unwrap()
+        .items[0]
+        .id;
+    let local = db
+        .record_history(HistoryScope::Local, "git status")
+        .unwrap()
+        .items[0]
+        .id;
+    assert_ne!(first, local);
     assert_eq!(
-        shared.iter().map(|entry| entry.id).collect::<Vec<_>>(),
-        vec![entries[1].id, entries[0].id]
+        db.record_history(HistoryScope::Ssh, "git status")
+            .unwrap()
+            .items[0]
+            .id,
+        first
     );
-    // Deleting one shared record by exact UUID never removes another source's record.
-    database.delete_history(&[entries[1].id]).unwrap();
-    let remaining = database.load().unwrap().history;
-    assert!(remaining.iter().any(|entry| entry.id == entries[0].id));
-    assert!(remaining.iter().any(|entry| entry.id == entries[2].id));
-    assert_eq!(remaining.len(), 2);
-    // Identical commands collapse to the newest copy within the shared SSH list.
-    let duplicate = HistoryEntry {
-        id: Id::new_v4(),
-        scope: format!("ssh:{source_b}"),
-        command: "git status".into(),
-        timestamp: 50,
-    };
-    database.touch_history(&duplicate).unwrap();
-    let deduplicated = database.load().unwrap().history;
-    let same_command: Vec<_> = deduplicated
-        .iter()
-        .filter(|entry| entry.command == "git status")
-        .collect();
-    assert_eq!(same_command.len(), 1);
-    assert_eq!(same_command[0].id, duplicate.id);
-    assert!(deduplicated.iter().any(|entry| entry.id == entries[2].id));
-    assert_eq!(deduplicated.len(), 2);
+    drop(db);
+    let mut db = Database::open(directory.path()).unwrap();
+    assert_eq!(
+        db.load()
+            .unwrap()
+            .history
+            .list(HistoryScope::Ssh)
+            .map(|i| i.id)
+            .collect::<Vec<_>>(),
+        vec![first, second]
+    );
+    db.delete_history(&[first]).unwrap();
+    drop(db);
+    let db = Database::open(directory.path()).unwrap();
+    let history = db.load().unwrap().history;
+    assert_eq!(history.items.len(), 2);
+    assert!(history.items.iter().all(|i| i.id != first));
+    assert_eq!(history.list(HistoryScope::Local).next().unwrap().id, local);
 }
 
 #[test]
@@ -84,36 +63,39 @@ fn shared_scope_does_not_include_local_or_malformed_origins() {
 }
 
 #[test]
-fn unknown_history_origins_do_not_deduplicate_with_shared_ssh_history() {
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("data");
-    let valid = HistoryEntry {
-        id: Id::new_v4(),
-        scope: format!("ssh:{}", Id::new_v4()),
-        command: "same command".into(),
-        timestamp: 1,
-    };
-    let unknown = HistoryEntry {
-        id: Id::new_v4(),
-        scope: "ssh-invalid".into(),
-        command: "same command".into(),
-        timestamp: 2,
-    };
-    let newest_valid = HistoryEntry {
-        id: Id::new_v4(),
-        scope: format!("ssh:{}", Id::new_v4()),
-        command: "same command".into(),
-        timestamp: 3,
-    };
-    let mut database = Database::open(&path).unwrap();
-    database.touch_history(&valid).unwrap();
-    database.touch_history(&unknown).unwrap();
-    database.touch_history(&newest_valid).unwrap();
-    database.compact_history().unwrap();
-    let entries = database.load().unwrap().history;
-    assert!(entries.iter().any(|entry| entry.id == unknown.id));
-    assert!(entries.iter().any(|entry| entry.id == newest_valid.id));
-    assert!(!entries.iter().any(|entry| entry.id == valid.id));
+fn normalization_preserves_internal_spacing_case_and_unicode() {
+    let mut catalog = HistoryCatalog::default();
+    assert!(catalog.record(HistoryScope::Ssh, " \n\t").is_none());
+    let id = catalog
+        .record(HistoryScope::Ssh, "  echo  中文 \n")
+        .unwrap();
+    assert_eq!(catalog.record(HistoryScope::Ssh, "echo  中文"), Some(id));
+    for command in ["echo 中文", "ECHO  中文", "echo\n中文"] {
+        catalog.record(HistoryScope::Ssh, command);
+    }
+    assert_eq!(catalog.items.len(), 4);
+    catalog.validate().unwrap();
+    let encoded = serde_json::to_string(&catalog).unwrap();
+    assert!(!encoded.contains("timestamp"));
+    assert!(!encoded.contains("scope"));
+    assert_eq!(
+        serde_json::from_str::<HistoryCatalog>(&encoded).unwrap(),
+        catalog
+    );
+}
+
+#[test]
+fn capacity_is_shared_and_invalid_membership_is_rejected() {
+    let mut catalog = HistoryCatalog::default();
+    let first = catalog.record(HistoryScope::Local, "first").unwrap();
+    for index in 0..HISTORY_LIMIT {
+        catalog.record(HistoryScope::Ssh, &format!("echo {index}"));
+    }
+    assert_eq!(catalog.items.len(), HISTORY_LIMIT);
+    assert!(!catalog.local_ids.contains(&first));
+    catalog.validate().unwrap();
+    catalog.local_ids.push(catalog.ssh_ids[0]);
+    assert!(catalog.validate().is_err());
 }
 
 #[test]
@@ -191,51 +173,31 @@ fn history_delete_targets_include_only_explicit_visible_selection() {
     assert!(history_delete_targets(&[visible[0], visible[2]], &hidden_selection).is_empty());
     assert!(history_delete_targets(&[], &all).is_empty());
 
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("data");
-    let scope = format!("ssh:{}", Id::new_v4());
-    let first = HistoryEntry {
-        id: visible[0],
-        scope: scope.clone(),
-        command: "first frozen command".into(),
-        timestamp: 1,
-    };
-    let second = HistoryEntry {
-        id: visible[1],
-        scope: scope.clone(),
-        command: "second frozen command".into(),
-        timestamp: 2,
-    };
-    let outside_search = HistoryEntry {
-        id: visible[2],
-        scope: scope.clone(),
-        command: "outside current search".into(),
-        timestamp: 3,
-    };
-    let mut database = Database::open(&path).unwrap();
-    for entry in [&first, &second, &outside_search] {
-        database.touch_history(entry).unwrap();
-    }
-    let mut selected = HashSet::new();
-    selected.insert(first.id);
-    selected.insert(second.id);
-    let frozen_targets = history_delete_targets(&[first.id, second.id], &selected);
-    let added_after_confirmation = HistoryEntry {
-        id: Id::new_v4(),
-        scope,
-        command: "added after confirmation".into(),
-        timestamp: 4,
-    };
-    database.touch_history(&added_after_confirmation).unwrap();
-    database.delete_history(&frozen_targets).unwrap();
-
-    let remaining = database.load().unwrap().history;
-    assert!(!remaining.iter().any(|entry| entry.id == first.id));
-    assert!(!remaining.iter().any(|entry| entry.id == second.id));
-    assert!(remaining.iter().any(|entry| entry.id == outside_search.id));
-    assert!(
-        remaining
-            .iter()
-            .any(|entry| entry.id == added_after_confirmation.id)
+    let mut db = Database::memory().unwrap();
+    let first = db
+        .record_history(HistoryScope::Ssh, "first frozen command")
+        .unwrap()
+        .items[0]
+        .id;
+    let second = db
+        .record_history(HistoryScope::Ssh, "second frozen command")
+        .unwrap()
+        .items[0]
+        .id;
+    let outside = db
+        .record_history(HistoryScope::Ssh, "outside current search")
+        .unwrap()
+        .items[0]
+        .id;
+    let frozen = history_delete_targets(&[first, second], &HashSet::from([first, second, outside]));
+    let later = db
+        .record_history(HistoryScope::Ssh, "added after confirmation")
+        .unwrap()
+        .items[0]
+        .id;
+    let remaining = db.delete_history(&frozen).unwrap();
+    assert_eq!(
+        remaining.items.iter().map(|i| i.id).collect::<Vec<_>>(),
+        vec![later, outside]
     );
 }

@@ -3,6 +3,42 @@ use crate::model::Language;
 /// Translate every product action through a single bilingual catalog.
 pub fn text(language: Language, key: &str) -> &'static str {
     let pair = match key {
+        "actions" => ("操作", "Actions"),
+        "permissions" => ("权限", "Permissions"),
+        "file_target_changed" => (
+            "文件目标已变化，请重新选择",
+            "The file target changed. Select it again",
+        ),
+        "delete_files_impact" => (
+            "将永久删除以上文件及目录内容，无法撤销。",
+            "These files and directory contents will be permanently deleted. This cannot be undone.",
+        ),
+        "format_text" => ("格式化", "Format"),
+        "format_text_hint" => (
+            "统一换行并清理行尾空白",
+            "Normalize line endings and remove trailing whitespace",
+        ),
+        "format_stale" => (
+            "文本已改变，请重新格式化",
+            "Text changed. Run formatting again",
+        ),
+        "format_failed" => (
+            "格式化失败，草稿已保留",
+            "Formatting failed; draft retained",
+        ),
+        "discard_draft" => ("放弃草稿", "Discard draft"),
+        "save_overwrites" => (
+            "保存将覆盖远端文件的当前内容",
+            "Saving replaces the current remote file contents",
+        ),
+        "credential_remove_failed" => (
+            "连接资料已删除，但部分已保存密码未能移除",
+            "Connections removed; some saved passwords could not be removed",
+        ),
+        "import_failed" => (
+            "导入失败，请重新选择 CSV 文件",
+            "Import failed. Select the CSV file again",
+        ),
         "process_command" => ("命令", "Command"),
         "check_updates" => ("检查更新", "Check for updates"),
         "update_checking" => ("正在检查最新版本…", "Checking for the latest version…"),
@@ -108,8 +144,8 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "copy_suffix" => ("副本", "Copy"),
         "connection_details" => ("连接详情", "Connection details"),
         "recent_three_minutes" => ("近 3 分钟", "Last 3 minutes"),
-        "last_sample" => ("最近采样", "Last sample"),
-        "no_samples" => ("等待采样", "Waiting for samples"),
+        "last_sample" => ("最近数据", "Latest data"),
+        "no_samples" => ("加载中", "Loading"),
         "offline_snapshot" => ("已断开 · 保留最近数据", "Offline · last known data"),
         "window_zoom" => ("缩放", "Zoom"),
         "local_history" => ("本地历史", "Local history"),
@@ -153,8 +189,8 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "port_process" => ("进程", "Process"),
         "port_associated_process" => ("关联进程", "Associated process"),
         "port_process_unavailable" => (
-            "当前采样中无法核实关联进程",
-            "Associated process is not available in the current sample",
+            "无法核实关联进程，请刷新后重试",
+            "Cannot verify the associated process. Refresh and try again",
         ),
         "port_local" => ("本地端点", "Local endpoint"),
         "port_peer" => ("对端", "Peer"),
@@ -177,8 +213,8 @@ pub fn text(language: Language, key: &str) -> &'static str {
             "Disconnected; port data cleared",
         ),
         "port_old_data" => (
-            "刷新失败，显示上次采样",
-            "Refresh failed; showing last sample",
+            "刷新失败，显示上次结果",
+            "Refresh failed; showing previous results",
         ),
         "details" => ("详情", "Details"),
         "process_state" => ("状态", "State"),
@@ -187,8 +223,8 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "process_resources" => ("资源占用", "Resource usage"),
         "process_runtime" => ("运行信息", "Runtime information"),
         "process_old_data" => (
-            "刷新失败，显示上次采样",
-            "Refresh failed; showing last sample",
+            "刷新失败，显示上次结果",
+            "Refresh failed; showing previous results",
         ),
         "process_count" => ("个进程", "processes"),
         "process_sort" => ("切换排序", "Change sort order"),
@@ -201,8 +237,8 @@ pub fn text(language: Language, key: &str) -> &'static str {
             "Disconnected; original process cannot be verified",
         ),
         "process_sample_unavailable" => (
-            "进程采样不可用或已过期，请刷新进程列表",
-            "Process sample unavailable or stale; refresh the process list",
+            "进程信息不可用或已过期，请刷新进程列表",
+            "Process information is unavailable or stale; refresh the process list",
         ),
         "process_preview_only" => (
             "仅限预览，不会发送进程信号",
@@ -227,8 +263,8 @@ pub fn text(language: Language, key: &str) -> &'static str {
         ),
         "process_sending" => ("正在发送结束请求", "Sending termination request"),
         "process_sent" => (
-            "信号已发送，等待采样确认退出",
-            "Signal sent; waiting for a sample to confirm exit",
+            "信号已发送，等待确认退出",
+            "Signal sent; waiting to confirm exit",
         ),
         "process_gone" => ("原进程实例已退出", "Original process instance has exited"),
         "process_changed" => (
@@ -255,10 +291,7 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "cores" => ("核心", "Cores"),
         "interfaces" => ("各接口合计", "All interfaces"),
         "cumulative" => ("累计流量", "Total traffic"),
-        "second_sample" => (
-            "CPU 和网络速率需要两次有效采样，概览会自动更新。",
-            "CPU and network rates need two valid samples. Overview updates automatically.",
-        ),
+        "second_sample" => ("正在加载 CPU 和网络速率…", "Loading CPU and network rates…"),
         "optional_name" => ("名称（可选）", "Name (optional)"),
         "encoding_warning" => (
             "部分输出无法按当前编码解码，请检查终端编码。",
@@ -339,6 +372,24 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "encoding" => ("编码", "Encoding"),
         "terminal_encoding" => ("终端编码", "Terminal encoding"),
         "appearance" => ("外观", "Appearance"),
+        "theme" => ("主题", "Theme"),
+        "follow_system_theme" => ("跟随系统外观", "Follow system appearance"),
+        "mouse_reporting" => ("鼠标报告", "Mouse reporting"),
+        "open_files_on_connect" => ("连接后打开文件面板", "Open files on connection"),
+        "remember_credentials" => ("记住认证凭据", "Remember credentials"),
+        "connection_security" => ("连接与安全", "Connections and security"),
+        "shortcuts" => ("快捷键", "Keyboard shortcuts"),
+        "enabled" => ("开启", "On"),
+        "disabled" => ("关闭", "Off"),
+        "next_pane" => ("切换窗格", "Next pane"),
+        "sort_name" => ("按名称排序", "Sort by name"),
+        "saving_metadata" => ("正在保存…", "Saving…"),
+        "metadata_failed" => ("保存失败，请重试。", "Could not save. Please retry."),
+        "passwords_failed" => (
+            "连接资料已保存，部分密码未能写入。",
+            "Connections saved; some passwords could not be stored.",
+        ),
+        "retry_passwords" => ("重试保存密码", "Retry saving passwords"),
         "day" => ("白天", "Day"),
         "night" => ("黑夜", "Night"),
         "language" => ("语言", "Language"),
@@ -473,7 +524,7 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "ports" => ("端口", "Ports"),
         "filter" => ("筛选", "Filter"),
         "unavailable" => ("暂不可用", "Unavailable"),
-        "sampling" => ("等待第二次采样", "Waiting for a second sample"),
+        "sampling" => ("加载中", "Loading"),
         "updated" => ("更新时间", "Updated"),
         "automatic" => ("每 3 秒刷新", "Every 3 seconds"),
         "transfer" => ("传输记录", "Transfer history"),

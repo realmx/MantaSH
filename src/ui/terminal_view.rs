@@ -130,7 +130,7 @@ impl TerminalView {
             size: self.preferences.terminal_size,
             cell_width: self.cell_width,
             line_height: self.line_height,
-            theme: self.preferences.theme,
+            theme: self.preferences.effective_theme(),
         };
         let Some(mut buffer) = self.session.terminal.try_lock() else {
             window.request_animation_frame();
@@ -350,6 +350,9 @@ impl TerminalView {
         )
     }
     fn mouse_sequence(&self, button: u8, col: usize, row: usize, release: bool) -> Option<Vec<u8>> {
+        if !self.preferences.mouse_reporting {
+            return None;
+        }
         crate::terminal_io::mouse_bytes(
             *self.session.terminal.lock().term.mode(),
             button,
@@ -514,7 +517,7 @@ impl Render for TerminalView {
         let entity = cx.entity();
         let measure = entity.clone();
         let paint = entity.clone();
-        let p = Palette::new(self.preferences.theme);
+        let p = Palette::new(self.preferences.effective_theme());
         div()
             .size_full()
             .min_w_0()
@@ -568,7 +571,9 @@ impl Render for TerminalView {
                 };
                 let (col, row) = this.cell_at(e.position);
                 let mode = *this.session.terminal.lock().term.mode();
-                let reporting = !e.modifiers.shift && mode.intersects(TermMode::MOUSE_MODE);
+                let reporting = this.preferences.mouse_reporting
+                    && !e.modifiers.shift
+                    && mode.intersects(TermMode::MOUSE_MODE);
                 let alternate = !e.modifiers.shift
                     && !reporting
                     && mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL);
@@ -651,7 +656,8 @@ impl Render for TerminalView {
                         // published the matching grid, and leaving old glyphs
                         // in the backing surface is visible as scattered `$`
                         // cells after the window returns to its old size.
-                        let background = Palette::new(paint.read(cx).preferences.theme).terminal;
+                        let background =
+                            Palette::new(paint.read(cx).preferences.effective_theme()).terminal;
                         window.paint_quad(fill(bounds, background));
                         let Some(prepared) = paint.update(cx, |view, _| view.prepare_paint(window))
                         else {
@@ -663,7 +669,7 @@ impl Render for TerminalView {
                         let cell_width = view.cell_width;
                         let line_height = view.line_height;
                         let preedit = view.preedit.clone();
-                        let p = Palette::new(preferences.theme);
+                        let p = Palette::new(preferences.effective_theme());
                         let font_size = px(preferences.terminal_size);
                         let mut cursor_bounds =
                             Bounds::new(bounds.origin, size(cell_width, line_height));
@@ -681,7 +687,7 @@ impl Render for TerminalView {
                                 for run in &row.plan.backgrounds {
                                     let bg = match run.fill {
                                         Background::Color(color) => {
-                                            ansi_color(color, p, preferences.theme)
+                                            ansi_color(color, p, preferences.effective_theme())
                                         }
                                         Background::Selection => p.selected,
                                         Background::Match => p.accent.opacity(0.25),
@@ -826,7 +832,7 @@ impl TerminalView {
 
     #[allow(dead_code)]
     fn render_scrollbar(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let p = Palette::new(self.preferences.theme);
+        let p = Palette::new(self.preferences.effective_theme());
         let (display_offset, history) = {
             let buffer = self.session.terminal.lock();
             (

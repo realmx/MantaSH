@@ -23,7 +23,7 @@ impl Workbench {
     /// reorder, so plain clicks keep their meaning.
     pub(super) fn begin_connection_drag(&mut self, row: Id, event: &MouseDownEvent) {
         self.connection_suppress_click = None;
-        if self.connection_drag.is_some() {
+        if self.connection_drag.is_some() || self.modal_commit.busy() {
             return;
         }
         self.connection_drag = Some(ConnectionDrag {
@@ -126,17 +126,22 @@ impl Workbench {
         // The slot counts visible rows; translate it into an insertion point
         // of the full saved list (a filter may hide rows between them).
         let before_target = visible.get(drag.slot).copied();
-        let profile = self.profiles.remove(from);
+        let mut order: Vec<_> = self.profiles.iter().map(|profile| profile.id).collect();
+        let id = order.remove(from);
         let to = match before_target {
-            Some(id) => self.profiles.iter().position(|p| p.id == id),
+            Some(target) => order.iter().position(|id| *id == target),
             None => visible
                 .last()
-                .and_then(|id| self.profiles.iter().position(|p| p.id == *id))
-                .map(|ix| ix + 1),
+                .and_then(|target| order.iter().position(|id| id == target))
+                .map(|index| index + 1),
         }
-        .unwrap_or(self.profiles.len());
-        self.profiles.insert(to.min(self.profiles.len()), profile);
-        self.backend.save_profiles(self.profiles.clone());
+        .unwrap_or(order.len());
+        order.insert(to.min(order.len()), id);
+        self.submit_metadata(
+            crate::services::metadata::Mutation::ReorderProfiles(order),
+            commits::AfterCommit::Stay,
+            cx,
+        );
         cx.notify();
         true
     }

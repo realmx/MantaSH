@@ -461,7 +461,9 @@ impl Workbench {
         maximum: f32,
         _cx: &mut Context<Self>,
     ) -> AnyElement {
-        let border = theme::Palette::new(self.prefs.theme).border.opacity(0.55);
+        let border = theme::Palette::new(self.prefs.effective_theme())
+            .border
+            .opacity(0.55);
         #[cfg(debug_assertions)]
         let view = _cx.entity();
         canvas(
@@ -568,12 +570,8 @@ impl Workbench {
                     move |bounds, _, cx| {
                         view.update(cx, |this, _| {
                             if let Some(qa) = &mut this.qa {
-                                // Absolute bounds are the padding box; include this card's 1px border.
-                                let outer = Bounds::new(
-                                    bounds.origin - point(px(1.), px(1.)),
-                                    bounds.size + size(px(2.), px(2.)),
-                                );
-                                qa.overview_bounds.insert(_name, outer);
+                                // Sections have no surrounding border; measure their actual box.
+                                qa.overview_bounds.insert(_name, bounds);
                                 qa.overview_revision += 1;
                             }
                         });
@@ -608,7 +606,7 @@ impl Workbench {
         action: bool,
         width: f32,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let percent = percent.filter(|value| value.is_finite() && (0. ..=100.).contains(value));
         let value = percent
             .map(|value| format!("{value:.1}%"))
@@ -705,7 +703,7 @@ impl Workbench {
     /// stretching between, percent right. The bar fill is a fraction of the
     /// flex track because the row width is not known at build time.
     fn cpu_core_row(&self, label: &str, percent: Option<f64>) -> Div {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let percent = percent.filter(|value| value.is_finite() && (0. ..=100.).contains(value));
         let value = percent
             .map(|value| format!("{value:.1}%"))
@@ -762,7 +760,7 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let Some(pane) = self.pane(owner) else {
             return div().into_any_element();
         };
@@ -854,7 +852,7 @@ impl Workbench {
         width: f32,
         separated: bool,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let percent = (disk.total > 0)
             .then(|| 100. * disk.used as f64 / disk.total as f64)
             .filter(|value| value.is_finite() && (0. ..=100.).contains(value));
@@ -1028,7 +1026,7 @@ impl Workbench {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let width = self.tool_width(window);
         let inner = width - 2. * theme::SPACE_PANEL;
         let mut card = self
@@ -1134,7 +1132,7 @@ impl Workbench {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let owner = pane.owner;
         let history = &pane.monitor_history;
         let latest = history.points.back();
@@ -1313,7 +1311,7 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let disk_percent = sample
             .disks
             .iter()
@@ -1374,7 +1372,7 @@ impl Workbench {
     /// The panel shows overview only: nothing above the CPU module. Sampling is
     /// automatic on connect and while visible; a disconnect clears all modules.
     pub(super) fn render_monitor(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let Some(pane) = self.active_pane() else {
             return div().into_any_element();
         };
@@ -1449,7 +1447,7 @@ impl Workbench {
 
     /// Scan processes as aligned, sortable columns; only the result region scrolls.
     fn render_process_list(&self, owner: Owner, cx: &mut Context<Self>) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let Some(pane) = self.pane(owner) else {
             return div().into_any_element();
         };
@@ -1647,13 +1645,6 @@ impl Workbench {
                                 )
                         },
                     ))
-                    .child(
-                        div()
-                            .w(px(48.))
-                            .flex_none()
-                            .text_color(p.muted)
-                            .child(self.t("process_state")),
-                    )
                     .child(div().w(px(20.)).flex_none()),
             )
             .child(
@@ -1883,25 +1874,6 @@ impl Workbench {
                                                         .child(bytes(process.rss)),
                                                 )
                                                 .child(
-                                                    div()
-                                                        .relative()
-                                                        .w(px(48.))
-                                                        .flex_none()
-                                                        .overflow_hidden()
-                                                        .text_ellipsis()
-                                                        .whitespace_nowrap()
-                                                        .text_color(p.muted)
-                                                        .child(self.measure_process_region(
-                                                            "row_state",
-                                                            cx,
-                                                        ))
-                                                        .child(if process.state.is_empty() {
-                                                            "—".into()
-                                                        } else {
-                                                            process.state.clone()
-                                                        }),
-                                                )
-                                                .child(
                                                     self.button(("process-details", index), "")
                                                         .icon(IconName::ChevronRight)
                                                         .ghost()
@@ -1949,7 +1921,7 @@ impl Workbench {
         if page == SystemPage::Processes {
             return self.render_process_list(owner, cx);
         }
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let Some(pane) = self.pane(owner) else {
             return div().into_any_element();
         };

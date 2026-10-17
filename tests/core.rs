@@ -227,29 +227,24 @@ fn database_round_trip_recovery_and_scoped_deletion() {
     let mut db = Database::open(dir.path()).unwrap();
     let profile = profile();
     db.save_profiles(std::slice::from_ref(&profile)).unwrap();
-    let a = HistoryEntry {
-        id: Id::new_v4(),
-        scope: "local".into(),
-        command: "echo one".into(),
-        timestamp: 1,
-    };
-    let b = HistoryEntry {
-        id: Id::new_v4(),
-        scope: profile.scope(),
-        command: "echo two".into(),
-        timestamp: 2,
-    };
-    let c = HistoryEntry {
-        id: Id::new_v4(),
-        scope: "ssh".into(),
-        command: "echo two".into(),
-        timestamp: 3,
-    };
-    db.touch_history(&a).unwrap();
-    db.touch_history(&b).unwrap();
-    db.delete_history(&[a.id]).unwrap();
-    // Same command in the shared SSH list replaces the older copy regardless of scope form.
-    db.touch_history(&c).unwrap();
+    let a = db
+        .record_history(HistoryScope::Local, "echo one")
+        .unwrap()
+        .items[0]
+        .id;
+    let b = db
+        .record_history(HistoryScope::Ssh, "echo two")
+        .unwrap()
+        .items[0]
+        .id;
+    db.delete_history(&[a]).unwrap();
+    assert_eq!(
+        db.record_history(HistoryScope::Ssh, "echo two")
+            .unwrap()
+            .items[0]
+            .id,
+        b
+    );
     db.trust(&profile.host, profile.port, "SHA256:verified")
         .unwrap();
     assert_eq!(
@@ -265,8 +260,8 @@ fn database_round_trip_recovery_and_scoped_deletion() {
     drop(db);
     let snapshot = Database::open(dir.path()).unwrap().load().unwrap();
     assert_eq!(snapshot.profiles, vec![profile]);
-    assert_eq!(snapshot.history.len(), 1);
-    assert_eq!(snapshot.history[0].id, c.id);
+    assert_eq!(snapshot.history.items.len(), 1);
+    assert_eq!(snapshot.history.items[0].id, b);
     assert_eq!(snapshot.preferences.ui_size, 17.);
     assert_eq!(snapshot.preferences.terminal_size, 13.);
 }

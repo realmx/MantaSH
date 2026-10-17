@@ -1,48 +1,126 @@
 #!/usr/bin/env python3
-"""Validate repository-local Markdown links, sample metadata and required documentation."""
+"""Validate local documentation links, heading anchors, licenses and UI label keys."""
 import csv
+import html
 from pathlib import Path
 import re
 import sys
+import unicodedata
+from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def prose_lines(text):
+    """Exclude fenced code so command examples do not define links or headings."""
+    fence = None
+    for line in text.splitlines():
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if fence is not None:
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+                fence = None
+            yield ""
+        elif marker:
+            fence = marker[1]
+            yield ""
+        else:
+            yield line
+
+
+def heading_anchors(text):
+    """Generate GitHub-style IDs for the ATX/Setext headings used in our docs."""
+    anchors = set()
+    previous = ""
+    for line in prose_lines(text):
+        match = re.match(r"^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$", line)
+        heading = match[1] if match else None
+        if heading is None and previous.strip() and re.fullmatch(r" {0,3}(?:=+|-+)\s*", line):
+            heading = previous.strip()
+        previous = line
+        if heading is None:
+            continue
+        heading = re.sub(r"!?\[([^\]]+)\]\([^)]+\)", r"\1", heading)
+        heading = html.unescape(re.sub(r"<[^>]+>", "", heading))
+        slug = "".join(
+            character for character in heading.lower()
+            if character in "-_" or character.isspace()
+            or unicodedata.category(character)[0] not in "PSCZ"
+        ).replace(" ", "-").replace("\t", "-")
+        anchor = slug
+        suffix = 0
+        while anchor in anchors:
+            suffix += 1
+            anchor = f"{slug}-{suffix}"
+        anchors.add(anchor)
+    return anchors
+
+
+def check_links(documents, root):
+    """Check repository-local inline links, including same-page heading fragments."""
+    errors = []
+    checked = 0
+    anchors = {}
+    link_pattern = re.compile(r'\]\(\s*(<[^>\n]+>|(?:\\.|[^\s)])+)(?:\s+(?:"[^"]*"|\x27[^\x27]*\x27))?\s*\)')
+    for document in documents:
+        text = "\n".join(prose_lines(document.read_text(encoding="utf-8")))
+        for match in link_pattern.finditer(text):
+            link = html.unescape(re.sub(r"\\([()])", r"\1", match[1].strip("<>")))
+            url = urlsplit(link)
+            if url.scheme or url.netloc:
+                continue
+            checked += 1
+            target = (document.parent / unquote(url.path)).resolve() if url.path else document.resolve()
+            label = f"{document.relative_to(root)}: {link}"
+            try:
+                target.relative_to(root)
+            except ValueError:
+                errors.append(f"Link leaves repository in {label}")
+                continue
+            if not target.exists():
+                errors.append(f"Broken link in {label}")
+            elif url.fragment and target.is_file() and target.suffix.lower() == ".md":
+                if target not in anchors:
+                    anchors[target] = heading_anchors(target.read_text(encoding="utf-8"))
+                if unquote(url.fragment) not in anchors[target]:
+                    errors.append(f"Broken heading anchor in {label}")
+    return checked, errors
+
+
 def main():
-    """Check concrete files and examples, without fetching websites or reading user configuration."""
+    """Check repository files without websites, user configuration or demo data."""
     required = ["README.md", "README.en.md", "AGENTS.md", "LICENSE", "CONTRIBUTING.md", "CHANGELOG.md", "THIRD_PARTY.md"]
-    required += [f"docs/{name}" for name in ("README.md", "features.md", "user-guide.md", "macos.md", "windows.md", "architecture.md", "implementation.md", "development.md", "ai-development.md", "release.md", "data.md", "design.md", "brand-philosophy.md", "terminal-reference.md", "delivery-status.md", "acceptance.md", "troubleshooting.md", "dependency-licenses.csv")]
+    required += [f"docs/{name}" for name in (
+        "README.md", "features.md", "user-guide.md", "updates.md", "macos.md", "windows.md",
+        "architecture.md", "development.md", "release.md", "data.md", "design.md",
+        "brand-philosophy.md", "acceptance.md", "troubleshooting.md", "dependency-licenses.csv",
+    )]
     errors = []
     for name in required:
         path = ROOT / name
         if not path.is_file() or path.stat().st_size == 0:
             errors.append(f"Missing or empty document: {name}")
-    checked = 0
-    documents = list(ROOT.glob("*.md")) + list((ROOT / "docs").glob("*.md"))
-    for document in documents:
-        text = re.sub(r"```.*?```", "", document.read_text(encoding="utf-8"), flags=re.S)
-        for link in re.findall(r"\]\(([^)]+)\)", text):
-            target = link.strip().strip("<>").split("#", 1)[0]
-            if not target or re.match(r"^[a-z]+:", target, flags=re.I):
-                continue
-            checked += 1
-            if not (document.parent / target).resolve().exists():
-                errors.append(f"Broken link in {document.relative_to(ROOT)}: {link}")
-    with (ROOT / "examples/connections.csv").open(newline="") as source:
+    if errors:
+        print("\n".join(errors), file=sys.stderr)
+        raise SystemExit(1)
+    documents = sorted(ROOT.glob("*.md")) + sorted((ROOT / "docs").rglob("*.md"))
+    checked, link_errors = check_links(documents, ROOT)
+    errors.extend(link_errors)
+    with (ROOT / "docs/dependency-licenses.csv").open(newline="", encoding="utf-8-sig") as source:
         reader = csv.reader(source)
-        header = next(reader)
+        if next(reader, []) != ["package", "version", "license", "license_file", "repository", "source"]:
+            errors.append("Invalid dependency license inventory header")
         rows = list(reader)
-    # Import/export use only the five-column CSV format; examples carry no secrets.
-    assert header == ["name", "host", "port", "username", "password"]
-    assert rows and all(len(row) == 5 and row[4] == "" for row in rows)
-    assert "GNU GENERAL PUBLIC LICENSE" in (ROOT / "LICENSE").read_text()
-    # Undefined labels are visible defects in screenshots as well as documentation drift.
+        if not rows or any(len(row) != 6 or not all(row[:3]) for row in rows):
+            errors.append("Invalid or empty dependency license inventory")
+    if "GNU GENERAL PUBLIC LICENSE" not in (ROOT / "LICENSE").read_text():
+        errors.append("Missing GPL license text")
+    # Undefined labels are visible UI defects as well as documentation drift.
     catalog = (ROOT / "src/ui/i18n.rs").read_text()
     keys = set(re.findall(r'^\s*"([a-z_]+)"\s*=>', catalog, re.M))
     for source in (ROOT / "src/ui").glob("*.rs"):
         for key in set(re.findall(r'\bt\("([a-z_]+)"\)', source.read_text())) - keys:
             errors.append(f"Undefined UI label in {source.relative_to(ROOT)}: {key}")
-    retired_keys = {"memory_details", "auth", "key", "search_terminal", "next", "previous_match"}
+    retired_keys = {"memory_details", "auth", "key", "search_terminal", "next", "previous_match", "default_ssh_port", "remember_credentials_hint"}
     for key in retired_keys:
         if re.search(rf'^\s*"{re.escape(key)}"\s*=>', catalog, re.M):
             errors.append(f"Retired UI label remains in catalog: {key}")
@@ -64,7 +142,7 @@ def main():
     if errors:
         print("\n".join(errors), file=sys.stderr)
         raise SystemExit(1)
-    print(f"Verified {len(required)} required documents, {checked} local links, matching CSV examples and literal UI label keys.")
+    print(f"Verified {len(required)} required documents, {checked} local links and heading anchors, dependency licenses and literal UI label keys.")
 
 
 if __name__ == "__main__":

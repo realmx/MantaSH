@@ -7,13 +7,13 @@ from pathlib import Path
 import subprocess
 
 from qa_history_connection_modals_macos import history_entries
-from qa_overview_layout_macos import Driver
+from qa_overview_layout_macos import Driver, fixture
 
 
 def measured_dialog(driver, key, expected, checks):
-    """Require fresh native width and centered x/y coordinates in the window."""
-    driver.action("draw")
-    driver.action("draw")
+    """Require fresh native bounds, viewport margins and no horizontal overflow."""
+    driver.draw_dialog()
+    driver.draw_dialog()
     state = driver.wait(
         lambda state: state["modal"] == key
         and state["dialog_frame_bounds"]
@@ -21,10 +21,15 @@ def measured_dialog(driver, key, expected, checks):
         f"{key} frame width {expected}",
     )
     frame = state["dialog_frame_bounds"]
-    assert frame["x"] >= 0 and frame["x"] + frame["width"] <= state["width"]
+    assert frame["x"] >= 15 and frame["x"] + frame["width"] <= state["width"] - 15
+    assert frame["y"] >= 23 and frame["y"] + frame["height"] <= state["height"] - 23
+    assert state["modal_scroll"]["max_x"] <= 1, (key, state["modal_scroll"])
     assert abs(frame["x"] + frame["width"] / 2 - state["width"] / 2) <= 1, (key, frame, state["width"])
     assert abs(frame["y"] + frame["height"] / 2 - state["height"] / 2) <= 1, (key, frame, state["height"])
-    checks.append(f"{key}: {expected}px and centered")
+    checks.append({"modal": key, "expected_width": expected, "frame": frame,
+                   "ui_size": state["preferences"]["ui_size"],
+                   "language": state["preferences"]["language"],
+                   "viewport": [state["width"], state["height"]]})
     return state
 
 
@@ -48,6 +53,39 @@ def main():
     checks = []
     try:
         driver.wait(lambda state: len(state["tabs"]) == 1, "startup")
+        driver.action("resize", width=960, height=640)
+        driver.wait(lambda state: state["width"] == 960 and state["height"] == 640, "small window")
+        for ui, extra in ((12, 0), (14, 0), (18, 64)):
+            driver.action("font_sizes", ui=ui, terminal=12)
+            driver.action("theme", night=ui == 18)
+            for english in (False, True):
+                driver.action("language", english=english)
+                driver.action("settings")
+                measured_dialog(driver, "settings", 520 + extra, checks)
+                driver.action("about")
+                measured_dialog(driver, "about", 360 + extra, checks)
+                driver.action("cancel_modal")
+                measured_dialog(driver, "settings", 520 + extra, checks)
+                driver.action("open_font_picker", terminal=False)
+                measured_dialog(driver, "font", 440 + extra, checks)
+                driver.action("cancel_modal")
+                measured_dialog(driver, "settings", 520 + extra, checks)
+                driver.action("cancel_modal")
+                driver.wait(lambda state: state["modal"] is None, "settings closed")
+                driver.action("ssh_form")
+                measured_dialog(driver, "profile", 560 + extra, checks)
+                driver.action("cancel_modal")
+                driver.wait(lambda state: state["modal"] is None, "profile closed")
+                driver.action("credential_fixture")
+                measured_dialog(driver, "credentials", 360 + extra, checks)
+                driver.action("cancel_modal")
+                driver.wait(lambda state: state["modal"] is None, "credentials closed")
+
+        driver.action("font_sizes", ui=14, terminal=12)
+        driver.action("theme", night=False)
+        driver.action("language", english=False)
+        driver.action("resize", width=1280, height=800)
+        driver.wait(lambda state: state["width"] == 1280 and state["height"] == 800, "standard window")
         driver.action("history_fixture", entries=history_entries()[:4])
         measured_dialog(driver, "history", 640, checks)
         driver.action("keystroke", key="escape")
@@ -104,6 +142,15 @@ def main():
         measured_dialog(driver, "credentials", 360, checks)
         driver.action("keystroke", key="escape")
         driver.wait(lambda state: state["modal"] is None, "credentials closed")
+
+        driver.action("overview_fixture", samples=fixture())
+        for ui, extra in ((14, 0), (18, 64)):
+            driver.action("font_sizes", ui=ui, terminal=12)
+            for kind in ("cpu", "disk"):
+                driver.action("resource_details", kind=kind)
+                measured_dialog(driver, "resource_details", 480 + extra, checks)
+                driver.action("cancel_modal")
+                driver.wait(lambda state: state["modal"] is None, "resource details closed")
     finally:
         if process.poll() is None:
             driver.send("quit")
@@ -115,7 +162,7 @@ def main():
     assert process.returncode == 0, process.returncode
     report = {"checks": checks, "binary": str(args.binary.resolve())}
     (directory / "dialog-widths.json").write_text(json.dumps(report, indent=2) + "\n")
-    print(json.dumps({"checks": checks, "report": str(directory / "dialog-widths.json")}))
+    print(json.dumps({"checks": len(checks), "report": str(directory / "dialog-widths.json")}))
 
 
 if __name__ == "__main__":

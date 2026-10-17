@@ -50,11 +50,12 @@ class CredentialAcceptance(Acceptance):
         self.wait(lambda s: len(s["tabs"]) == 1, "Fresh isolated workbench")
         self.action("profile", profile=profile)
         self.action("submit_profile", connect=False)
+        self.wait(lambda s: s["profiles"] == 1 and not s["commit"]["busy"], "Profile save finishes before opening")
         self.action("open_saved", id=profile["id"])
         self.wait(lambda s: s["modal"] == "trust", "Saved password profile opens directly into host verification")
         self.action("trust")
         state = self.wait(lambda s: s["modal"] == "credentials", "Unsaved password requested only after host verification")
-        self.check(state["credential_prompt"]["reason"] == "Missing", "Password prompt appears with the missing-password reason (saving is always on; the toggle was removed)")
+        self.check(state["credential_prompt"]["reason"] == "Missing", "Password is requested after host verification under the default remember policy")
         owner = self.pane(state)["owner"]
         attempt = self.pane(state)["attempt"]
         self.action("fixture_credentials", file=str(secret_file))
@@ -63,8 +64,8 @@ class CredentialAcceptance(Acceptance):
         self.wait(lambda s: self.pane(s)["state"] == "Connected", "One password entry authenticates and saves without a master-password form")
         self.check("凭据已保存" in (self.state()["notice"] or ""), "Encrypted local credential write reports success")
         self.action("profile", profile=profile)
-        self.wait(lambda s: s["modal"] == "profile" and s["connection_library"]["form"]["secret_present"] and not s["connection_library"]["form"]["secret_loading"], "Edit form loads the saved password")
-        self.check(self.state()["connection_library"]["form"]["existing"], "Saved connection opens the edit form with its password")
+        self.wait(lambda s: s["modal"] == "profile" and s["connection_library"]["form"]["existing"], "Saved connection opens its metadata form")
+        self.check(not self.state()["connection_library"]["form"]["secret_present"], "Editing connection metadata never preloads a saved password")
         self.action("dismiss")
         self.action("reconnect")
         self.wait(lambda s: self.pane(s)["state"] == "Connected" and self.pane(s)["attempt"] != attempt,
@@ -98,6 +99,7 @@ class CredentialAcceptance(Acceptance):
         unsaved = {**profile, "id": str(uuid.uuid4()), "name": "Unsaved credential fixture"}
         self.action("profile", profile=unsaved)
         self.action("submit_profile", connect=False)
+        self.wait(lambda s: s["profiles"] == 2 and not s["commit"]["busy"], "Second profile save finishes before opening")
         self.action("tab", index=0)
         self.action("open_saved", id=unsaved["id"], background=True)
         self.wait(lambda s: len(s["tabs"]) == 3 and s["tabs"][2]["panes"][0]["state"] == "CredentialsRequired",

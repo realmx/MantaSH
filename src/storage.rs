@@ -3,7 +3,7 @@ use crate::model::*;
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Serialize, de::DeserializeOwned};
-use std::collections::HashMap;
+mod migration;
 use std::path::Path;
 
 pub struct Database {
@@ -14,7 +14,7 @@ pub struct Snapshot {
     pub profiles: Vec<Profile>,
     pub preferences: Preferences,
     pub workspace: Workspace,
-    pub history: Vec<HistoryEntry>,
+    pub history: HistoryCatalog,
     pub transfers: Vec<TransferRecord>,
 }
 
@@ -29,27 +29,15 @@ impl Database {
         }
         let conn = Connection::open(directory.join("mantash.sqlite3"))?;
         conn.busy_timeout(std::time::Duration::from_secs(3))?;
-        Self::initialize(conn)
+        Self::initialize(conn, Some(directory))
     }
     /// Isolated storage for tests and explicitly disclosed session-only recovery mode.
     pub fn memory() -> Result<Self> {
-        Self::initialize(Connection::open_in_memory()?)
+        Self::initialize(Connection::open_in_memory()?, None)
     }
-    fn initialize(conn: Connection) -> Result<Self> {
-        // One format, stamped with a generation number: files without a stamp adopt 1,
-        // any other number is a format this build does not understand and is rejected
-        // without modification. Additive-only evolution keeps the stamp at 1 forever.
-        let version: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        ensure!(
-            version == 0 || version == 1,
-            "Database format version {version} is not supported"
-        );
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-          CREATE TABLE IF NOT EXISTS records(kind TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(kind,id));
-          CREATE TABLE IF NOT EXISTS trust(host TEXT NOT NULL, port INTEGER NOT NULL, fingerprint TEXT NOT NULL, PRIMARY KEY(host,port));")?;
-        if version == 0 {
-            conn.pragma_update(None, "user_version", 1)?;
-        }
+    fn initialize(mut conn: Connection, directory: Option<&Path>) -> Result<Self> {
+        migration::initialize(&mut conn, directory)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         Ok(Self { conn })
     }
     fn list<T: DeserializeOwned>(&self, kind: &str) -> Result<Vec<T>> {
@@ -82,8 +70,7 @@ impl Database {
         // Work restoration is unconditional: tabs and layout always come back.
         let mut workspace: Workspace = self.one("workspace")?;
         workspace.normalize();
-        let mut history: Vec<HistoryEntry> = self.list("history")?;
-        history.sort_by_key(|h| std::cmp::Reverse(h.timestamp));
+        let history = self.history_catalog()?;
         let mut transfers: Vec<TransferRecord> = self.list("transfer")?;
         for task in &mut transfers {
             if task.state.active() {
@@ -131,58 +118,34 @@ impl Database {
         tx.commit()?;
         Ok(())
     }
-    /// Persist one reliably reported command, replacing older copies of the same
-    /// command in its logical list, and keep the newest 5,000 history entries.
-    pub fn touch_history(&self, entry: &HistoryEntry) -> Result<()> {
-        if let Some(group) = HistoryScope::group_of(&entry.scope) {
-            for old in self
-                .list::<HistoryEntry>("history")?
-                .into_iter()
-                .filter(|old| {
-                    old.command == entry.command
-                        && HistoryScope::group_of(&old.scope) == Some(group)
-                })
-            {
-                self.conn.execute(
-                    "DELETE FROM records WHERE kind='history' AND id=?1",
-                    params![old.id.to_string()],
-                )?;
-            }
-        }
-        self.put("history", &entry.id.to_string(), entry)?;
-        self.conn.execute("DELETE FROM records WHERE kind='history' AND rowid NOT IN (SELECT rowid FROM records WHERE kind='history' ORDER BY rowid DESC LIMIT 5000)", [])?;
-        Ok(())
+    /// Read the validated, source-free history snapshot.
+    pub fn history_catalog(&self) -> Result<HistoryCatalog> {
+        migration::read(&self.conn)
     }
-    /// Collapse stored duplicates once at startup: per logical list each command
-    /// keeps only its newest entry, so pre-dedup data cannot reappear after deletes.
-    pub fn compact_history(&mut self) -> Result<()> {
-        let entries: Vec<HistoryEntry> = self.list("history")?;
-        let mut newest: HashMap<(bool, &str), (i64, Id)> = HashMap::new();
-        let mut stale: Vec<Id> = Vec::new();
-        for entry in &entries {
-            let Some(group) = HistoryScope::group_of(&entry.scope) else {
-                continue;
-            };
-            let key = (matches!(group, HistoryScope::Ssh), entry.command.as_str());
-            match newest.get(&key) {
-                Some((timestamp, _)) if *timestamp >= entry.timestamp => stale.push(entry.id),
-                Some((_, kept)) => {
-                    stale.push(*kept);
-                    newest.insert(key, (entry.timestamp, entry.id));
-                }
-                None => {
-                    newest.insert(key, (entry.timestamp, entry.id));
-                }
-            }
-        }
-        if !stale.is_empty() {
-            self.delete_records("history", &stale)?;
-        }
-        Ok(())
+    /// Record one reliable execution atomically, reusing its logical-list identity.
+    pub fn record_history(&mut self, scope: HistoryScope, command: &str) -> Result<HistoryCatalog> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let mut catalog = migration::read(&tx)?;
+        catalog.record(scope, command);
+        migration::write(&tx, &catalog)?;
+        tx.commit()?;
+        Ok(catalog)
     }
-    /// Delete only explicitly selected history identifiers.
-    pub fn delete_history(&mut self, ids: &[Id]) -> Result<()> {
-        self.delete_records("history", ids)
+    /// Delete the frozen identities in the same transaction as membership updates.
+    pub fn delete_history(&mut self, ids: &[Id]) -> Result<HistoryCatalog> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let mut catalog = migration::read(&tx)?;
+        catalog.delete(ids);
+        migration::write(&tx, &catalog)?;
+        tx.commit()?;
+        Ok(catalog)
+    }
+    pub fn profiles(&self) -> Result<Vec<Profile>> {
+        self.list("profile")
     }
     fn delete_records(&mut self, kind: &str, ids: &[Id]) -> Result<()> {
         let tx = self.conn.transaction()?;

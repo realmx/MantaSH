@@ -137,6 +137,36 @@ def main():
         )
         assert cleared["history_view"]["anchor"] is None
         checks.append("history Escape clears selection and keeps the modal open")
+
+        frozen = cleared["history_view"]["target"]
+        driver.action("tab", index=0)
+        switched = driver.draw_dialog()
+        assert switched["history_view"]["target"] == frozen
+        assert switched["history_view"]["scope"] == "ssh"
+        assert len(switched["history_view"]["rows"]) == 100
+        assert not switched["history_view"]["can_insert"]
+        driver.action("history_select", index=0)
+        driver.draw_dialog()
+        driver.action("keystroke", key="escape")
+        driver.wait(lambda state: state["modal"] == "history"
+                    and not state["history_view"]["selected"], "fixed SSH selection cleared")
+        checks.append("switching to a local tab preserves the SSH scope and Escape clears its selection")
+
+        driver.action("tab", index=history["active_tab"])
+        driver.action("history_select", index=0)
+        driver.action("history_review_delete")
+        driver.wait(lambda state: state["modal"] == "delete_history", "fixed history deletion")
+        driver.action("tab", index=0)
+        driver.action("cancel_modal")
+        restored = driver.draw_dialog()
+        assert restored["history_view"]["target"] == frozen
+        assert restored["history_view"]["scope"] == "ssh"
+        assert len(restored["history_view"]["selected"]) == 1
+        checks.append("delete cancellation restores the original history owner, scope and modal instance")
+        driver.action("keystroke", key="escape")
+        driver.wait(lambda state: state["modal"] == "history"
+                    and not state["history_view"]["selected"], "restored selection cleared")
+        driver.action("tab", index=history["active_tab"])
         driver.action("keystroke", key="escape")
         driver.wait(lambda state: state["modal"] is None, "history Escape closes empty modal")
         checks.append("history Escape closes when no row is selected")
@@ -165,7 +195,7 @@ def main():
                 viewport = state["modal_scroll"]["bounds"]
                 content = state["modal_scroll"]["content_bounds"]
                 footer = state["transfer_view"]["footer_bounds"]
-                assert abs(frame["width"] + 2 - 480) < 1, frame
+                assert abs(frame["width"] + 2 - (480 + max(ui - 14, 0) * 16)) < 1, frame
                 assert abs(content["x"] - viewport["x"] - 12) < 1
                 assert abs(viewport["x"] + viewport["width"] - content["x"] - content["width"] - 12) < 1
                 assert footer["y"] >= viewport["y"] + viewport["height"] - 1
@@ -347,12 +377,14 @@ def main():
         )
         driver.action("import", text=csv)
         driver.action("confirm_import")
+        driver.wait(lambda state: not state["commit"]["busy"] and state["profiles"] == len(profiles),
+                    "CSV transaction committed against persisted profiles")
         driver.action("sidebar")
         driver.action("draw")
         driver.action("draw")
         library = driver.wait(
             lambda state: state["modal"] == "connections"
-            and len(state["connection_library"]["visible"]) == len(profiles) + 2
+            and len(state["connection_library"]["visible"]) == len(profiles)
             and state["connection_library"]["scrollbar_bounds"]
             and state["connection_library"]["add_bounds"],
             "connection modal geometry",
@@ -364,7 +396,7 @@ def main():
         assert abs((scrollbar["x"] + scrollbar["width"]) - (bounds["x"] + bounds["width"]) - 12) < 1
         checks.append("connection scrollbar is painted flush with the list right edge")
         assert geometry["add_bounds"]["width"] > 0
-        checks.append("connection footer Add button is painted and measurable")
+        checks.append("connection header Add button is painted and measurable")
 
         driver.action("connection_select", index=1)
         driver.action("connection_select", index=4, shift=True)

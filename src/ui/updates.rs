@@ -216,6 +216,7 @@ impl Workbench {
 
     pub(super) fn check_update_button(&self, cx: &mut Context<Self>) -> controls::Button {
         self.button("check-updates", self.t("check_updates"))
+            .primary()
             .disabled(!matches!(
                 self.updates.phase,
                 Phase::Idle
@@ -431,7 +432,7 @@ impl Workbench {
         if let Some(error) = &self.updates.error {
             body = body.child(
                 div()
-                    .text_color(theme::Palette::new(self.prefs.theme).muted)
+                    .text_color(theme::Palette::new(self.prefs.effective_theme()).muted)
                     .child(error.clone()),
             );
         } else if self.updates.phase == Phase::Available {
@@ -461,7 +462,7 @@ impl Workbench {
                         "update_confirm"
                     }),
                 )
-                .primary()
+                .warning()
                 .on_click(cx.listener(|this, _, w, cx| this.start_update(w, cx))),
             );
         }
@@ -476,6 +477,13 @@ impl Workbench {
                             "cancel"
                         },
                     ),
+                )
+                .when(
+                    matches!(
+                        self.updates.phase,
+                        Phase::Downloading | Phase::Preparing | Phase::Ready | Phase::Closing
+                    ),
+                    |button| button.warning(),
                 )
                 .disabled(self.update_handoff_active())
                 .on_click(cx.listener(|this, _, w, cx| this.cancel_modal(w, cx))),

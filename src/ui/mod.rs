@@ -1,5 +1,6 @@
 //! Native workbench. Every view action targets an explicit session/document identifier.
 mod i18n;
+mod settings;
 mod shell;
 mod terminal_view;
 pub mod theme;
@@ -56,9 +57,12 @@ mod qa {
         }
     }
 }
+mod editor;
+mod file_actions;
 mod system;
 mod tab_reorder;
 mod tools;
+use file_actions::{FileAction, FileClipboard, FileSnapshot, PendingFileOperation};
 mod transfer_paths;
 mod updates;
 mod window_actions;
@@ -121,8 +125,12 @@ pub fn register_about(cx: &mut App) {
         let Some(handle) = cx.active_window().or_else(|| cx.windows().first().copied()) else {
             return;
         };
-        let _ = handle.update(cx, |_, window, cx| {
-            window.dispatch_action(Box::new(ShowAboutModal), cx);
+        // Native menu actions already run inside a window update. Defer until
+        // GPUI returns that window to the app before borrowing it again.
+        cx.defer(move |cx| {
+            let _ = handle.update(cx, |_, window, cx| {
+                window.dispatch_action(Box::new(ShowAboutModal), cx);
+            });
         });
     });
 }
@@ -166,7 +174,8 @@ pub(super) struct FileTool {
     encoding: Option<crate::encoding::Encoding>,
     /// Session-local copy buffer for the file context menu: source paths
     /// captured by "copy", pasted with a remote `cp -R`. Never leaves the pane.
-    clipboard: Option<Vec<String>>,
+    clipboard: Option<FileClipboard>,
+    pending: HashMap<Id, PendingFileOperation>,
 }
 pub(super) struct Document {
     owner: Owner,
@@ -183,6 +192,8 @@ pub(super) struct Document {
     /// deferred Change event must not mark the document dirty.
     reverting: bool,
     saving: bool,
+    save_snapshot: Option<(u64, String, crate::encoding::Encoding)>,
+    formatting: Option<Id>,
     error: Option<String>,
 }
 pub(super) struct Pane {
@@ -274,6 +285,7 @@ struct TransferBatch {
     file_path: String,
     file_request: Option<Id>,
 }
+mod commits;
 pub struct Workbench {
     backend: Backend,
     receiver: async_channel::Receiver<Event>,
@@ -284,11 +296,16 @@ pub struct Workbench {
     #[cfg(target_os = "macos")]
     native_titlebar: Option<macos_titlebar::TitlebarRegions>,
     active: usize,
-    history: Vec<HistoryEntry>,
+    history: HistoryCatalog,
+    metadata_revision: u64,
+    modal_commit: commits::CommitState,
+    import_request: Option<Id>,
     transfers: Vec<TransferRecord>,
     transfer_batches: HashMap<Id, TransferBatch>,
     history_views: [history::HistoryView; 2],
     connection_search: Entity<InputState>,
+    /// Stable focus targets survive theme changes and settings rerenders.
+    settings_switch_focus: HashMap<&'static str, FocusHandle>,
     connection_selected: Option<Id>,
     /// Multi-select set for batch deletion in the connection library.
     connection_multi: std::collections::HashSet<Id>,
@@ -305,7 +322,7 @@ pub struct Workbench {
     /// Row whose click must be swallowed after a completed drag.
     connection_suppress_click: Option<Id>,
     connection_return: bool,
-    history_return: Option<Owner>,
+    history_return: Option<history::HistoryTarget>,
     /// Owner whose editor dialog to restore when a nested dialog (encoding,
     /// go-to, conflict, close confirmation) opened from it is dismissed.
     editor_return: Option<Owner>,
@@ -361,7 +378,7 @@ impl Workbench {
     pub fn new(
         backend: Backend,
         receiver: async_channel::Receiver<Event>,
-        snapshot: Snapshot,
+        mut snapshot: Snapshot,
         warning: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -392,6 +409,7 @@ impl Workbench {
             selected: HashSet::new(),
             anchor: None,
         });
+        snapshot.preferences.system_theme = Some(theme::system_theme(window));
         theme::apply(&snapshot.preferences, window, cx);
         let qa = qa::Controller::start(&backend);
         let mut this = Self {
@@ -405,9 +423,16 @@ impl Workbench {
             native_titlebar,
             active: snapshot.workspace.active_tab,
             history: snapshot.history,
+            metadata_revision: 0,
+            modal_commit: Default::default(),
+            import_request: None,
             transfers: snapshot.transfers,
             history_views,
             connection_search,
+            settings_switch_focus: settings::SWITCH_KEYS
+                .into_iter()
+                .map(|key| (key, cx.focus_handle().tab_stop(true)))
+                .collect(),
             connection_selected: None,
             connection_multi: Default::default(),
             connection_anchor: None,
@@ -456,6 +481,13 @@ impl Workbench {
             allow_close: false,
             qa,
         };
+        this.subscriptions
+            .push(cx.observe_window_appearance(window, |this, window, cx| {
+                this.prefs.system_theme = Some(theme::system_theme(window));
+                if this.prefs.follow_system_theme {
+                    this.apply_preferences(window, cx);
+                }
+            }));
         for index in 0..this.history_views.len() {
             let search = this.history_views[index].search.clone();
             this.subscriptions.push(cx.subscribe(
@@ -645,7 +677,7 @@ impl Workbench {
     fn loading_spinner(&self) -> gpui_component::spinner::Spinner {
         gpui_component::spinner::Spinner::new()
             .with_size(px((self.prefs.ui_size + 2.).min(20.)))
-            .color(theme::Palette::new(self.prefs.theme).accent)
+            .color(theme::Palette::new(self.prefs.effective_theme()).muted)
     }
     pub(super) fn t(&self, key: &str) -> &'static str {
         i18n::text(self.prefs.language, key)
@@ -956,6 +988,7 @@ impl Workbench {
                 tree_loading_path: None,
                 encoding: None,
                 clipboard: None,
+                pending: HashMap::new(),
             },
             documents: vec![],
             active_document: None,
@@ -972,15 +1005,21 @@ impl Workbench {
         owner: Owner,
         spec: SessionSpec,
         secret: String,
-        remember: bool,
+        _remember: bool,
         cx: &mut Context<Self>,
     ) -> Entity<TerminalView> {
-        let session = self
-            .backend
-            .start(owner, spec, zeroize::Zeroizing::new(secret), remember);
+        let session = self.backend.start(
+            owner,
+            spec,
+            zeroize::Zeroizing::new(secret),
+            self.prefs.remember_credentials,
+        );
         let terminal = cx.new(|cx| TerminalView::new(session, self.prefs.clone(), cx));
         self.subscriptions
             .push(cx.subscribe(&terminal, |this, _, event: &PaneFocused, cx| {
+                if this.active_owner() != Some(event.0) {
+                    this.invalidate_commit_navigation();
+                }
                 for (index, tab) in this.tabs.iter_mut().enumerate() {
                     if let Some(pane_index) = tab.panes.iter().position(|p| p.owner == event.0) {
                         this.active = index;
@@ -1009,6 +1048,7 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.invalidate_commit_navigation();
         self.compact_sidebar_open = false;
         let pane = self.create_pane(spec, true, window, cx);
         self.tabs.push(Tab {
@@ -1031,6 +1071,7 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.invalidate_commit_navigation();
         self.compact_sidebar_open = false;
         if !force_new {
             if let Some((tab, pane)) = self.tabs.iter().enumerate().find_map(|(i, t)| t.panes.iter().position(|p| matches!(&p.spec, SessionSpec::Ssh { profile: saved, .. } if saved.id == profile.id)).map(|j| (i, j))) {
@@ -1126,6 +1167,16 @@ impl Workbench {
             pane.files.request = None;
             pane.files.loading = false;
             pane.files.loaded = false;
+            pane.files.clipboard = None;
+            pane.files.pending.clear();
+            pane.opened_requests.clear();
+            pane.open_latest.clear();
+            for document in &mut pane.documents {
+                document.open_request = None;
+                document.saving = false;
+                document.save_snapshot = None;
+                document.formatting = None;
+            }
             pane.monitor_request = None;
             pane.monitor_error = None;
             pane.port_expanded.clear();
@@ -1201,6 +1252,7 @@ impl Workbench {
     }
     pub(super) fn apply_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.prefs.normalize();
+        self.prefs.system_theme = Some(theme::system_theme(window));
         theme::apply(&self.prefs, window, cx);
         for (input, key) in [(&self.connection_search, "connection_search_hint")] {
             let placeholder = self.t(key);
@@ -1376,13 +1428,14 @@ impl Workbench {
             #[cfg(debug_assertions)]
             Event::Qa(request) => self.qa_request(request, window, cx),
             Event::State(owner, state) => {
+                let open_files = self.prefs.open_files_on_connect;
                 if let Some(pane) = self.pane_mut(owner) {
                     if pane.state == ConnectionState::Cancelled {
                         return;
                     }
                     if state == ConnectionState::Connected {
                         pane.tool = Some(Tool::System);
-                        pane.files_open = true;
+                        pane.files_open = open_files;
                         if let Some(terminal) = pane.pending_terminal.take() {
                             let restore_focus = pane
                                 .terminal
@@ -1450,9 +1503,9 @@ impl Workbench {
                         }
                     }
                     if state == ConnectionState::Connected {
-                        // Auto-load files and system info for every SSH pane
-                        // on connection, regardless of which tab is active.
-                        self.navigate(owner, None, cx);
+                        if open_files {
+                            self.navigate(owner, None, cx);
+                        }
                         self.refresh_monitor(owner, cx);
                     }
                 }
@@ -1485,6 +1538,7 @@ impl Workbench {
                             reason,
                             secret,
                             show_secret: false,
+                            remember,
                             reply: Some(reply),
                         },
                         window,
@@ -1559,16 +1613,7 @@ impl Workbench {
                     pane.title = crate::titles::clean(&title, 256);
                 }
             }
-            Event::History(entry) => {
-                // One command per logical list: reruns refresh the newest copy in place.
-                let group = crate::model::HistoryScope::group_of(&entry.scope);
-                self.history.retain(|existing| {
-                    crate::model::HistoryScope::group_of(&existing.scope) != group
-                        || existing.command != entry.command
-                });
-                self.history.insert(0, entry);
-                self.history.truncate(5000);
-            }
+            Event::Metadata(receipt) => self.metadata_receipt(receipt, window, cx),
             Event::HostKey {
                 owner,
                 host,
@@ -1876,16 +1921,20 @@ impl Workbench {
                 result,
             } => {
                 if let Some(doc) = self.document_mut(owner, document) {
+                    if doc.save_snapshot.as_ref().map(|snapshot| snapshot.0) != Some(revision) {
+                        return;
+                    }
+                    let (_, saved_text, saved_encoding) = doc.save_snapshot.take().unwrap();
                     doc.saving = false;
                     match result {
                         Ok(SaveResult::Saved(stamp)) => {
-                            if doc.revision == revision {
-                                doc.original.stamp = stamp;
-                                doc.dirty = false;
-                                doc.original.text = doc.input.read(cx).value().to_string();
-                                doc.original.encoding = doc.encoding;
-                                doc.error = None;
-                            }
+                            doc.original.stamp = stamp;
+                            doc.original.text = saved_text;
+                            doc.original.encoding = saved_encoding;
+                            doc.dirty = doc.revision != revision
+                                || doc.encoding != saved_encoding
+                                || doc.input.read(cx).value().as_ref() != doc.original.text;
+                            doc.error = None;
                         }
                         Ok(SaveResult::Conflict) => {
                             doc.error = Some("Remote file changed; draft retained".into());
@@ -1905,14 +1954,11 @@ impl Workbench {
                     }
                 }
             }
-            Event::FileOperation { owner, result, .. } => match result {
-                Ok(()) => self.navigate(owner, None, cx),
-                Err(error) => {
-                    if let Some(p) = self.pane_mut(owner) {
-                        p.files.error = Some(error);
-                    }
-                }
-            },
+            Event::FileOperation {
+                owner,
+                request,
+                result,
+            } => self.file_operation_receipt(owner, request, result, window, cx),
             Event::Transfer(record) => {
                 let record_id = record.id;
                 if let Some(task) = self.transfers.iter_mut().find(|task| task.id == record_id) {
@@ -2061,8 +2107,7 @@ impl Workbench {
                 }
                 self.refresh_monitor(owner, cx);
             }
-            Event::Error(error) | Event::ProfilesSaved(Err(error)) => self.notice = Some(error),
-            Event::ProfilesSaved(Ok(())) => {}
+            Event::Error(error) => self.notice = Some(error),
             Event::Output(owner) => {
                 // Hidden tabs retain one pending wakeup until their next paint; their output is still parsed.
                 if self

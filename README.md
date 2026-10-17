@@ -28,12 +28,13 @@ brew install realmx/taps/mantash --cask
 
 ## 核心能力
 
-- 本地 PTY、多标签与 Shell 历史；每个本地标签最多混合分屏为 5 个窗格，SSH 不分屏。
-- SSH 密码认证与主机指纹确认；确认主机后才发送密码，认证成功后在本机 AES-256-GCM 加密保存，不设主密码、不用系统钥匙串。
-- SFTP 文件浏览与传输、远程文本编辑（普通文本不超过 8 MB，保存时最后覆盖），以及 SSH 标签共享历史。
-- Linux 远端资源、进程与端口监控；中英文、明暗主题、字体设置和工作区恢复。
+- 本地 PTY、多标签与 Shell 集成；每个本地标签最多 5 个左右、上下或混合窗格，SSH 不分屏。
+- SSH 密码认证、主机指纹确认、断开重连和本机加密凭据；连接库支持搜索、排序、克隆、多选及 CSV 导入导出。
+- SFTP 浏览、复制、重命名、删除、上传下载、后台传输与记录；在线编辑支持 8 MB 内普通文本、严格编码、草稿及可撤销基础格式化。
+- SSH 共享命令历史，支持搜索、复制、填入和明确执行；Linux 远端提供资源、进程、端口详情及确认后的进程结束操作。
+- 中英文、明暗主题、系统外观跟随、字体字号、工作区恢复，以及确认后下载、校验和安装的自动更新。
 
-不支持私钥认证、仅提供 RSA 主机密钥的服务器或目录上传入口。其他边界见[功能与范围](docs/features.md)。
+完整入口与限制见[功能与范围](docs/features.md)和[用户手册](docs/user-guide.md)。SSH 仅密码认证；旧式 RSA 主机密钥已追加兼容配置，真实旧版服务器仍待专项验收。目录上传、传输自动续传和重启后的编辑草稿恢复不在当前功能范围内。
 
 ## 开始使用
 
@@ -65,16 +66,7 @@ cd MantaSH
 cargo run --locked
 ```
 
-基础检查：
-
-```sh
-cargo fmt --all -- --check
-cargo test --locked --no-default-features --all-targets
-cargo check --locked --no-default-features --all-targets
-python3 scripts/check_docs.py
-```
-
-`Cargo.toml` 是源码版本基线，major/minor 由维护者手工决定；`master` 更新若只涉及根目录 Markdown、`docs/` 中的 Markdown 或 `assets/screenshots/` 截图，不创建 tag 或 Release。出现其它变更时，版本 workflow 按上个 tag 至当前提交的差异创建一个 `vX.Y.Z` tag，不提交自动增版；Release 构建临时同步版本元数据。已发布版本以 tag 和 Release 为准；分支构建只提供限时构件。详见[发布文档](docs/release.md)。
+检查命令、专项测试和隔离原生 QA 统一见[开发与验证](docs/development.md#必做检查)。`Cargo.toml` 保持源码版本基线；源码变更推送到 `master` 后由 workflow 创建版本 tag 并派发发布，纯文档更新跳过。版本规则、签名和安装包流程见[发布文档](docs/release.md)。
 
 ## 文档与许可
 

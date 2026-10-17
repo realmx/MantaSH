@@ -28,12 +28,13 @@ Alternatively, download the package for your architecture from [GitHub Releases]
 
 ## Capabilities
 
-- Local PTY terminals, tabs and Shell history; each local tab supports up to five mixed split panes. SSH tabs cannot be split.
-- SSH password authentication and host-fingerprint verification. Passwords are sent only after host approval and encrypted locally with AES-256-GCM after successful authentication, without a master password or system Keychain.
-- SFTP browsing and transfers, remote text editing (regular text up to 8 MB; last-write-wins saves), and shared history across SSH tabs.
-- Resource, process and port monitoring for Linux hosts; Chinese and English, themes, fonts and workspace restoration.
+- Local PTY terminals, tabs and Shell integration; each local tab supports up to five horizontal, vertical or mixed panes. SSH tabs cannot be split.
+- SSH password authentication, host-fingerprint verification, reconnection and locally encrypted credentials; searchable profiles with sorting, cloning, multiple selection and CSV import/export.
+- SFTP browsing, copying, renaming, deletion, uploads, downloads and background transfers; text editing up to 8 MB with strict encoding, session drafts and undoable basic formatting.
+- Shared SSH command history with search, copy, fill and explicit execution; Linux resource, process and port details, with confirmation before terminating a process.
+- Chinese and English, light/dark themes, system appearance, fonts, workspace restoration and updates that download, verify and install after confirmation.
 
-Key-based SSH authentication, servers offering only RSA host keys and directory upload through the picker are not supported. See [features and scope](docs/features.md) for other boundaries.
+See [features and scope](docs/features.md) and the [user guide](docs/user-guide.md) for all entry points and limits. SSH uses password authentication; legacy RSA host-key compatibility is configured, with real legacy-server connections still awaiting validation. Directory uploads, automatic transfer resumption and editor-draft recovery after restart are not available.
 
 ## Get Started
 
@@ -65,16 +66,7 @@ cd MantaSH
 cargo run --locked
 ```
 
-Basic checks:
-
-```sh
-cargo fmt --all -- --check
-cargo test --locked --no-default-features --all-targets
-cargo check --locked --no-default-features --all-targets
-python3 scripts/check_docs.py
-```
-
-`Cargo.toml` is the source version baseline; maintainers choose major/minor changes manually. Updates to `master` containing only root Markdown files, Markdown files in `docs/`, or screenshots in `assets/screenshots/` create no tag or Release. Other changes are compared against the last version tag and create one `vX.Y.Z` tag without a version commit. Release builds temporarily sync version metadata; published versions are defined by tags and Releases, while branch builds only provide short-lived artifacts. See the [release guide](docs/release.md).
+Required checks, targeted tests and isolated native QA are documented in [development](docs/development.md#必做检查). `Cargo.toml` remains the source version baseline. Source changes pushed to `master` trigger version tagging and release dispatch; documentation-only updates are skipped. See the [release guide](docs/release.md) for version rules, signing and packaging.
 
 ## Documentation and License
 

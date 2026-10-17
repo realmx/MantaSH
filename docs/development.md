@@ -1,25 +1,30 @@
 # 开发与验证
 
-面向维护者的代码组织、实现约定与可执行验证入口。视觉与交互规格见[设计规范](design.md)，架构与数据流见[架构文档](architecture.md)，数据格式见[数据文档](data.md)，发布流程见[发布文档](release.md)。
+本页提供可复现的构建、检查和隔离 QA 入口。模块与复杂状态约定见[架构](architecture.md)，用户行为、界面规格和数据格式分别维护在[功能说明](features.md)、[用户手册](user-guide.md)、[设计规范](design.md)和[数据文档](data.md)；实际平台证据见[验收说明](acceptance.md)。
 
-## 代码组织
+## 构建环境
 
-- `model.rs` / `storage.rs`：可持久化元数据与 SQLite 读写、损坏恢复。
-- `connections.rs`：连接 CSV 导入导出与合并；`encoding.rs`：严格编码转换、BOM 与二进制判定。
-- `terminal.rs`：ANSI 网格、选区与输入编码；`titles.rs`：可靠标题；`integration.rs`：会话内 Shell 事件注入并恢复用户 HISTFILE。
-- `ssh.rs`：主机验证与传输建立；`files.rs`：SFTP 与文件传输；`monitor.rs`：Linux 采样解析；`processes.rs`：进程身份与信号。
-- `layout.rs`：布局树与右栏宽度；`services.rs` / `events.rs`：后台任务调度与类型化事件。
-- `file_selection.rs`：文件选区（完整路径、范围起点、键盘终点）。隐藏过滤同步清除不可见目标；原生行事件固定 Owner 与目录请求 ID，拒绝过期请求、其它窗格和已切换工具页的事件；批量确认按当前可见顺序快照目标。
-- `ui/`：GPUI 视图、交互、颜色与文案；新增界面文案进入 `src/ui/i18n.rs`。概览模块分隔线用 `border_t_1 + border_color` 保证全宽绘制。
+使用 [Cargo.toml](../Cargo.toml) 声明的 Rust 1.89 或更新的兼容工具链，保留 [Cargo.lock](../Cargo.lock)，用 `--locked` 构建。产品是 Rust/GPUI 原生应用，运行不依赖 Node.js；Python 3 用于文档检查和 QA 脚本。
 
-桌面 feature 默认启用；`--no-default-features` 保留业务与真实协议服务，适合无窗口测试。正常 UI 无模拟适配器，测试服务器只存在于 tests。
+| 环境 | 要求与入口 |
+|---|---|
+| macOS | Xcode Command Line Tools 或 Xcode、Rust。GPUI 启用 `runtime_shaders`，运行时使用 Metal，调试构建无需独立 `metal` 命令；安装与人工回归见 [macOS 指南](macos.md) |
+| Windows | Rust MSVC 工具链、Visual Studio Build Tools 的 C++ 桌面组件及 Windows SDK；额外架构需对应 target 和编译工具，见 [Windows 指南](windows.md) |
+| 回环 SSH/SFTP 测试 | Unix 测试使用真实 Shell、PTY 与系统 OpenSSH `sftp-server`：macOS 为 `/usr/libexec/sftp-server`，Linux 为 `/usr/lib/openssh/sftp-server`。Windows 的 SFTP 实机检查使用明确的测试服务器 |
+| 专项工具 | 终端边界脚本需要 Node.js；真实 Vite 场景另需 npm 和已安装的 Vite CLI；截图像素核对与 LOGO 生成需要 Pillow。只有对应场景需要这些工具 |
 
-## 实现约定
+在仓库根目录构建并启动：
 
-- 渲染函数不执行网络、文件或数据库 IO；后台失败保留原目标与可恢复状态，不依赖当前标签应用结果。不用 `unwrap` 处理用户输入或远程错误；测试断言与不可恢复的初始化错误分别说明。
-- 异步事件必须携带 Owner（session UUID + attempt UUID）；目录导航、监控采样、进程详情、传输另有独立请求 UUID。消费端复核归属，丢弃过期、重连、取消、切换标签或工具页及其它窗格的旧结果。
-- 间距只用 `theme::SPACE_*` 阶梯（见[设计规范](design.md#排版与组件)）。可点击控件统一走 `ui/controls.rs` 按钮包装层：悬停手型、禁用禁止光标；tooltip 只保留在按钮上，概览卡片、趋势图、历史文本等非按钮元素不注册。
-- 修改 UI 文案必须更新 `i18n.rs` 集中目录，并同步用户手册中的入口与快捷键。
+```sh
+rustc --version
+cargo --version
+cargo build --locked
+cargo run --locked
+```
+
+源码更新后重新编译并正常退出旧实例，已打开的窗口不会自动替换。首次构建需要下载锁定依赖，缓存齐全后可加 `--offline`。默认 `desktop` feature 包含桌面程序；`--no-default-features` 可运行核心和真实协议测试，不构建 GPUI 窗口。
+
+平台辅助脚本 [check-macos.sh](../scripts/check-macos.sh) 与 [check-windows.ps1](../scripts/check-windows.ps1) 顺序执行格式、无桌面测试、桌面检查和 debug 构建；分别加 `--run` / `-Run` 可在检查后启动。它们不打包发布，也不包含下面全部基础检查，文档检查仍须单独执行。
 
 ## 必做检查
 
@@ -30,182 +35,184 @@ cargo check --locked --no-default-features --all-targets
 python3 scripts/check_docs.py
 ```
 
-只扩展与变更相关的验证，不用重复测试制造通过数量。修复事件归属、取消、编码、导入或保存逻辑时必须附带能区分正确/错误行为的测试；简单文案和尺寸修改以原生检查为主。跨模块修改时分别运行相关功能、原生 QA 和平台检查，统一记录当前源码与脚本指纹；测试准备失败或驱动时序问题单独记录，不把不同构建的结果累加。
+改动桌面代码、资源或 GPUI 依赖时，再在目标桌面平台执行：
 
-## 弹窗系统
+```sh
+cargo check --locked --all-targets
+cargo build --locked
+```
 
-`Workbench::modal` 保存当前弹窗；`modal_stack` 保存被普通子弹窗暂时覆盖的 `ModalFrame`（弹窗实例、滚动句柄、弹窗焦点和打开前的具体控件焦点），`modal_confirm_return` 单独保存有既定业务去向的确认父帧。`show_modal` 在普通弹窗之间移动父实例，`dismiss` 恢复最近父级并重新聚焦可继续操作的输入或列表；搜索词、表单实体、选区和专用滚动句柄不因重建弹窗丢失。删除连接/文件/历史、主机信任、传输开始/停止、进程结束、冲突和未保存关闭等确认类型不进入普通父级栈，沿用固定目标校验、取消与成功后去向；确认链路结束会清理遗留父帧，避免下次独立打开时错误恢复旧弹窗。
+修复归属、取消、编码、导入或保存缺陷时补能区分正确/错误行为的针对性测试；文案、尺寸等改动以相关静态检查和原生观察为主，不增加复述实现的测试。检查通过后仅因新修改、失败或未解决疑点扩展验证。
 
-- 遮罩必须 `.inset_0()` 占满顶层 `.relative().size_full()` 根节点后再 flex 居中，仅 `.absolute()` 会让遮罩缩到弹窗内容尺寸。
-- 宽度经 `Modal::is_confirmation()` 分类设上限：确认类 480px、其它普通弹窗 640px、`Modal::Editor` 豁免保留 960px，另受窗口左右 16px 边距约束。
-- 虚拟列表（连接库、文件树）遵循 gpui 0.2 `uniform_list` 的 `ListSizingBehavior::Auto` 约束：父容器必须经确定高度的 flex 链给定视口，条目根布局显式 `.w_full()`，否则选中/悬停背景按 fit-content 收缩。文件树行固定高度并共享显式宽度，列表设 `ListHorizontalSizingBehavior::Unconstrained`，同一 `UniformListScrollHandle` 承接两轴；目录定位用 `scroll_to_item`，不能依赖只绘制可见行的 paint 坐标。
-- 历史弹窗高度按实际滚动视口测量内容，仅在 600px 或视口上限截断时由列表滚动；高度调整后的 QA 必须再执行无输入 `draw`，待下一布局帧更新 `ScrollHandle` 视口，不能把设置的目标高度当作已完成布局。
-- QA：`scripts/qa_modal_widths_macos.py` 断言各弹窗外框与视口中心两向误差 ≤1px 及缩放后重新居中；`scripts/qa_history_connection_modals_macos.py` 覆盖历史与连接库弹窗的隔离回归，fixture 不启动传输、不写真实目录。
+文档检查器验证必需文件、仓库内链接和 Markdown 章节锚点，并检查许可证清单及界面文案键。修改该脚本时运行 `python3 -m unittest discover -s tests -p 'test_check_docs.py'`；CI 同时运行此测试与文档检查。
 
-## 连接库
+## 按变更选择验证
 
-- 搜索由 `connections::matches_query` 匹配名称与 endpoint，空格分词、忽略大小写。键盘目标每次从当前可见结果按 UUID 解析，空列表不打开连接；Enter 经单行 Input 的公开 action 路由。搜索框仅捕获无修饰键 ↑/↓，输入法 marked range 期间交给输入法。快捷键与菜单共用 `OpenConnections`。
-- 列表以 `uniform_list` 虚拟化：每帧只构建可见行；过滤行快照按查询词与全部资料字段指纹缓存在 `connection_rows_cache`，滚动帧不重复过滤或分配，资料变化整体重建。
-- 多选状态保存在 `connection_multi`（UUID 集合）与 `connection_anchor`（范围起点）：单击单选并更新锚点，Cmd/Ctrl+单击增减，Shift+单击按可见顺序取范围（配合 Cmd/Ctrl 为追加范围），键盘 ↑/↓ 同步锚点。搜索词变化时集合与锚点裁剪到仍可见的行，隐藏行不能成为批量删除目标。批量删除确认后 `save_profiles` 持久化并在后台逐项 `vault.forget`；Escape 有选中行时只清空多选、锚点和高亮并保持弹窗打开。
-- 行内编辑、克隆、连接图标按钮按 UUID 复核实时资料并阻断行级点击冒泡；连接动作始终 `open_saved(new_instance=true)` 新开标签，同一资料可开多个独立会话。
-- 弹窗布局、footer 与表单排版见[设计规范](design.md#连接库)。调试驱动只暴露公开连接 ID、查询、布局、多选集合和表单状态，不暴露 secret 输入。
+下表列出 `tests/` 中现有测试目标及其适用范围。运行单项时用 `cargo test --locked --no-default-features --test <目标名>`；同一命令可重复 `--test` 选择多个目标。测试名称和平台条件以源码为准。
 
-## 文件面板与传输
+| 变更范围 | 测试目标 | 重点 |
+|---|---|---|
+| 通用模型、编码、CSV | `core`、`import_monitor_boundaries` | 编码/BOM、二进制拒绝、跨包多字节、CSV 合并与边界输入 |
+| 元数据与历史 | `metadata_commit`、`shared_history`、`history_migration`、`shell_history` | FIFO、request/revision、密码分阶段失败、格式 2 一致备份/事务失败、各列表稳定 UUID 去重、nonce 与重启 |
+| 凭据与 SSH/SFTP | `automatic_vault`、`ssh_sftp` | 主机确认先于凭据读取、认证后保存、错误密码保护、旧回复取消、真实 SFTP 文件及传输；`tests/support/credential_reconnect.rs` 由 `ssh_sftp` 引入 |
+| 终端 I/O、网格与输入 | `local_pty`、`terminal_updates`、`terminal_paint`、`local_terminal_clear`、`command_cursor`、`git_bash` | 真实 PTY、连续 resize/关闭、唤醒合并、damage 与完整帧逐格一致、局部复制、Unicode、清屏与滚动边界、提示符定位 |
+| 文件选择与编辑 | `file_selection`、`editor_format`、`ssh_sftp` | 隐藏过滤/过期选区、UTF-8 端点、最新读取、最后保存覆盖、权限/取消失败保护及目录传输 |
+| 工作区与偏好 | `layout_storage`、`preferences_normalize`、`window_layout` | 五窗格上限、损坏图恢复、格式标记、宽度偏好、默认值及几何 |
+| Linux 监控与进程 | `monitor_history`、`processes`、`process_command_filter`、`import_monitor_boundaries` | 缺失分段、差值、身份一致、受保护 PID、固定信号、未知结果及 macOS 拒绝 Linux 操作 |
+| 自动更新 | `update` | 版本/平台资源选择、校验、安装助手和失败边界，另见[自动更新](updates.md) |
 
-文件列表右键菜单仅保留文件操作，刷新在工具栏；删除项经组件库 `menu_element_with_disabled` 按启用状态使用错误色或禁用灰色，动作由 `FileMenuDelete` 复核目标。传输记录选区保存在 `transfer_selected`/`transfer_anchor`，Esc 有选中时只清空；`remove_transfer_records` 点击时重新核对弹窗 Owner、当前会话、选区与终态——有选区只移除所选已结束记录，否则移除该会话全部已结束记录，运行中不删除，删除后留在原弹窗并异步移除 SQLite 记录，不生成确认弹窗。
+终端机制曾对照 iTerm2 固定提交 `ce706b849e8d07332ce36ceab6eeee511e8be2be` 的[刷新调度](https://github.com/gnachman/iTerm2/blob/ce706b849e8d07332ce36ceab6eeee511e8be2be/sources/PTYSession/iTermUpdateCadenceController.m)、[Metal 驱动](https://github.com/gnachman/iTerm2/blob/ce706b849e8d07332ce36ceab6eeee511e8be2be/sources/MetalRenderer/iTermMetalDriver.m)和[字形缓存](https://github.com/gnachman/iTerm2/blob/ce706b849e8d07332ce36ceab6eeee511e8be2be/sources/MetalRenderer/Renderers/iTermTextRenderer.mm)作机制参考；MantaSH 继续使用自身 Rust/GPUI 实现，不据此承诺相同功能、帧率或输入延迟。
 
-`Modal::Transfer` 显式保存批次 UUID、`TransferPhase`（Review/Running/Result）、记录 UUID、覆盖选项与核对时的原目录/请求快照。`confirm_transfers` 在注册 worker 前同步切到 Running，空任务、重复提交、过期 Owner/目录请求均不启动；选择器回调另核对活动会话、连接、路径、请求和下载选区。后台结果按 UUID 归属收敛：只有全部成功才自动关闭（且仅当原 Owner、原路径与请求仍一致时刷新文件列表，用户手动导航后不回跳），失败/取消进入 Result 并保留逐项原因。标题栏 X、Esc 和“后台继续”只关闭进行中视图；停止由 `Modal::CancelTransfers` 固定主机及当时活跃任务 UUID，确认时再次核对归属，只请求后端停止，终态以 worker 回复为准。失败/取消结果提供逐项重试：只在新 UUID 上重新展示核对页，不覆盖旧历史。并发上限两个 worker，临时文件保护不变；`transfer_paths::endpoints` 与 `display_name` 只负责展示，不参与路径计算。用户可见的阶段排版与进度呈现见[设计规范](design.md#文件面板与传输)。
+桌面单元测试需启用默认 feature，例如：
 
-QA：`scripts/qa_transfers_macos.py --directory <目录> --fixture <fixture 目录>` 经真实回环 SFTP 验证多文件/目录传输、字节哈希、目标绑定、覆盖失败、重试、并发限制和取消；启动 QA 应用时把 `MANTASH_QA_REMOTE_ROOT` 设为 fixture.json 中 root 经真实路径解析后的值（macOS `/var` 与 `/private/var` 是同一路径的不同写法）。`stage_transfer` 只替代系统文件选择器，确认、取消和重试与正式界面共用入口；原生确认及服务真实执行不代表系统文件选择对话框已通过物理鼠标验收。
+```sh
+cargo test --locked --lib ui::controls::tests
+cargo test --locked --lib ui::updates::tests
+```
 
-## 系统工具：进程与端口
+前者覆盖五种按钮 tone、主题对比度、外观组合和禁用状态，后者覆盖手动/自动检查、重复请求、取消与迟到回复。Switch 的焦点与完整按下/抬起周期、编辑事务的原生撤销/重做则使用下面的专项 QA。
 
-进程列表（`Modal::SystemTools { page: Processes }`）、单进程详情（`Modal::ProcessDetails`）与端口列表（`page: Ports`）是三个独立弹窗，均读取所属 SSH Pane 的监控采样：连接成功后开始采样，可见期间每 3 秒刷新，列表无手动刷新按钮，进程详情标题栏保留刷新按钮；列表筛选、排序、展开与滚动状态属于 Pane，重连/断线清理。
-
-- `processes::current_process` 要求有效 Linux 进程段、原 boot ID、原 PID 和启动 ticks 完全一致；`process_target` 另核对连接、采样错误与 10 秒新鲜度。详情指标只读该返回值，禁止从已失效旧快照或同 PID 新实例补值；`process_action_reason` 与按钮禁用、提交前保护共用判定。
-- `Modal::ProcessDetails` 保存固定 Owner/进程身份、最新详情请求 UUID、旧读取结果；`apply_process_details_result` 只接受 Owner 与最新 UUID 匹配且仍在等待的回复（含确认页暂存的父弹窗），失败时保留上次成功命令。摘要使用双列同行标签和值，启动时间占整行；行/列/组间距分别为 8/16/12px，标签不收缩、值可换行。完整命令与补充状态直接平铺、随正文统一滚动，复制按钮始终复制完整命令。`Details::supplementary_status` 仅过滤摘要中已有的 State/Pid/PPid/VmRSS，不改变原始读取结果；刷新期间不插入加载提示。`ProcessConfirm` 固定主机与动作，取消和确认提交后均恢复原详情；发送状态驻留 `process_attempts` 按请求 ID 接受异步结果。`Outcome::Sent` 不等于 Gone，后续有效采样才确认原实例退出，10 秒未确认显示 StillRunning，既不自动升级 SIGKILL 也不重试。
-- 端口数据保持 `ss` 原始记录语义：`port_view.rs` 只做端点拆分、完整字段筛选、协议归类、数字排序与重复行 `PortKey`；未加方括号的 IPv6 不猜端口，UDP 状态按原样显示。`port_view::process_pids` 从 `ss -p` 提取去重 PID，展开区进程详情复用 `show_process_details`，仍经 Owner、身份、boot ID、PID 和启动 ticks 核验。复制前再次核对 Owner、当前弹窗和可见采样，不执行 SSH 写操作。
-- 列表几何与排版契约见[设计规范](design.md#系统工具)。QA：`qa_process_list_macos.py`（0/3/90 行、表头行对齐、筛选稳定高度）、`qa_process_details_macos.py`（过期回复、两种确认取消、身份失效、长命令与原始状态）、`qa_ports_macos.py`（0/3/5/48 行、表头行几何对齐、展开/搜索/排序/复制、错误与断线）均使用隔离样本，不把 QA 绘制当成正式入口真实鼠标验收。显式 QA `preview` 双重禁止信号，合成采样/命令不连接远端；真实信号路径由 `processes.rs` 测试与后台 SSH 请求覆盖。
-
-## 系统概览
-
-`monitor_history.rs` 维护有限采样窗口与缺失数据分段，GPUI canvas 绘制网络趋势（限 56px）；CPU、内存和磁盘显示当前百分比。`Palette::meter_color` 对 0–25% 与 85–100% 做 sRGB 插值、中间固定蓝色；`resource_meter` 共用 0–100% 轨道，`network_card` 是概览中唯一绘制 `trend_chart` 的视图。配色、模块布局与信息密度见[设计规范](design.md#系统工具)。
-
-- 资源入口为 GPUI 可聚焦行：`show_resource_details` 验证当前 Owner 和概览页面后打开 CPU/磁盘详情；`MantaSHResource` 上下文绑定 Enter/Space，FocusHandle 跟随 Pane 保存，关闭后返回原焦点句柄。资源弹窗固定所属 Owner，无主机/采样时间栏与底部操作栏，正文随最新概览样本更新。
-- `Pane.pending_terminal` 等待本次连接成功，失败/取消不替换旧显示终端；新 Owner 的旧异步结果继续由原过滤入口拒绝。历史操作只有可验证的 Shell 提示符才能填入/执行；文件行操作在提交前重新验证 Owner、request 和路径。
-- QA：`scripts/qa_overview_layout_macos.py --binary <debug 可执行文件> --directory <全新临时目录>` 用 `overview_fixture`（最多 61 条有界 Linux 样例，拒绝进程/端口记录，生成未连接会话）执行 draw 后测量多种视口/字号的模块高度、全宽分隔线、弹窗内边距和滚动边界，不连接 Linux、不发送键盘输入。`scripts/check_overview_pixels.py --image <PNG> --state <state.json>` 对已呈现窗口的截图按 ICC 转换 sRGB 后核对轨道填充比例与网络曲线；截图和状态必须来自同一已成功编译的版本，不用 draw 或其它二进制截图代替正常呈现。
-
-## 本地终端与 PTY
-
-输出唤醒、damage 复制与刷新调度见[终端机制](terminal-reference.md)。本地实现要点：
-
-- Unix 本地 PTY 使用单一非阻塞 I/O 循环：先排空当前宽度的输出，以 500ms 稳定窗口等待 Zoom 中间尺寸结束，最终排空并重新检查队列后才更新 PTY 与仿真器网格；Windows 保留 ConPTY 既有后台路径。提示符和右侧提示始终由 Shell 的真实 SIGWINCH 重绘负责，应用不向 emulator 注入合成滚屏或提示符移动序列。
-- `TerminalBuffer` 用 VTE 状态解析器跟踪清屏边界。后台为本地会话创建 `new_local`：普通 `CSI 2 J` 在原位擦除视口，保留光标、背景和已有历史，不采用 alacritty `clear_viewport` 将当前画面移入历史的策略。Vite 8.3.0 使用另一种刷新序列：先连续输出约一屏换行，再 `CSI 1;1 H` 回顶并 `CSI 0 J` 擦除下方。本地普通屏幕识别连续至少 `rows-1` 个换行后紧接回顶和 ED0 的完整序列，将仍能放入空白视口的历史回填；仅重排网格存储，不修改 PTY 尺寸、不丢弃保留的输出，超出视口的实际内容仍可滚动。普通换行、局部擦除、备用屏幕与 SSH 保持既有语义。显式 `CSI 3 J` 清历史仍有效，跨 PTY read 的序列由跟踪器保留状态。回归见 `tests/local_terminal_clear.rs`。
-- `resize_local` 只在本地、可信提示符未收到输入、光标在首行、原 history 为空且其余可见行全空时，清除本次 resize 刚产生的 history（未清屏 zsh RPROMPT 的 reflow 场景）；有真实 scrollback、编辑中的命令或下方输出时保持原网格语义。输入状态只保存两个布尔值，提交后的新提示符才复位。
-- `TerminalView` 只接受与测量尺寸相同的网格帧，并在每个布局帧清空 retained canvas，避免 AppKit 动画期间的旧字形残留。
-- `scripts/qa_terminal_scroll_macos.py --binary target/debug/mantash --vite-cli <已安装的 vite/bin/vite.js> --directory <全新隔离目录>` 使用真实 npm/Vite、隔离 zsh 右提示符，验证短输出无历史、绘制所用滑块状态、窗口缩放、标签切换、溢出回滚和运行中清屏；已用 Vite 8.3.0 验证。QA 快照包含终端测量高度、行高、网格行数、历史行数、滑块参数及外层滚动范围，以区分高度溢出和终端历史，不以请求接受代替状态完成。
-
-## 标签栏与平台标题栏
-
-- `ui/tab_reorder.rs` 在顶栏内记录手势 UUID、源标签 ID、水平位移和候选插入位置。标签命中区域用 occlude 隔离 GPUI 事件，窗口级捕获监听处理移动与释放；横向位移达 4px 才进入排序，按可见标签中点计算插入位置，栏外释放和 Esc/失焦取消。滚轮事件显式转交标签 ScrollHandle，边缘滚动随手势结束停止；排序后按 UUID 恢复活动索引，不将排序误当成会话切换触发自动滚回。关闭按钮有独立命中区域。
-- 原生 `TitleBar` 的内部行禁止收缩，`min_w_0` 无法限制其最小内容宽度：标题栏内容在分配区域内定位，避免标签总宽度参与祖先最小尺寸计算；活动标签仅在首次显示与尺寸变化后的测量完成后补一次定位，不在每次输出重绘时重复。
-- 标签底色由父容器管理，`TabLabel` 使用透明的 GPUI 自定义按钮配色防止组件库 ghost 悬浮背景叠加在选中标签上；`TabClose` 单独提供中性局部反馈，三项专用语义色不改通用选中色。标签状态不改变字重或宽度。
-- macOS 全尺寸透明标题栏下，Window Server 按 AppKit 提前注册的区域拖动窗口，可能不向应用发送 mouse-down；GPUI 0.2.2 的 `on_hit_test_window_control` 未实现、`start_window_move` 无 macOS 覆盖，occlude、停止冒泡和 app-local 事件监视都不足以修复。`ui/macos_titlebar.rs` 用应用自有 `MantaSHTitlebarExclusionView` 在每个可见标签、按钮和应用图标的实际位置放置透明原生区域视图：`hitTest:` 返回 nil（鼠标、滚轮和焦点继续进入原 GPUIView）、`mouseDownCanMoveWindow` 返回 NO、`_opaqueRectForWindowMoveWhenInTitlebar` 返回自身 bounds，把该矩形从 Window Server 的标题栏拖动区域排除；空白处不放区域视图，保留系统拖窗、交通灯和窗口菜单，`NSWindow.isMovable` 保持 true。区域按绘制后的标签滚动视口裁剪换算到 NSView 坐标，按位置稳定排序并复用未改变视图；关闭、滚动、字号和窗口尺寸变化时更新/移除，仅几何改变时通过暂时切换并立即恢复 `movableByWindowBackground` 使 AppKit 刷新缓存（两次设置间不分发事件）。区域持有 GPUIView 弱引用，关闭解除附着，RAII 兜底。该 AppKit 兼容点未公开，参考 [Firefox 的原生区域机制](https://github.com/mozilla/gecko-dev/blob/8f0a87156f64f797a45e2773654538b0e99904d7/widget/cocoa/nsCocoaWindow.mm)与[新版 GPUI 的标题栏处理](https://github.com/zed-industries/zed/blob/72c53bf0aae2e619f146d96415f79caf77310455/crates/gpui_macos/src/window.rs)独立实现，不复制业务视图、不修改系统或 GPUI 类、不升级锁定依赖；升级 macOS/GPUI 后必须复查。
-- 顶栏 Stateful header 只转发一次 macOS `titlebar_double_click` 并阻止外层 GPUI TitleBar 重复转发，空白区域双击只执行一次 Zoom。
-- QA：`scripts/qa_tab_reorder_macos.py` 在投递程序化 NSEvent 之前等待 AppKit 自己查询当前原生区域（调试计数在几何改变时归零），比较原生区域与 GPUI 绘制边界，验证空白不被遮挡、事件穿透、窗口仍可移动及排序、取消、关闭、滚动、字号与工作区保存；能发现缺失原生区域处理的回归，但仍不等同于真实物理鼠标验收。
-
-## 窗口菜单与 About
-
-- macOS `install_system_menu` 显式注册本地化的 NSApplication.windowsMenu，并使用标准 performMiniaturize:/performZoom: responder action（锁定版 GPUI 只会自动注册字面名称为 Window 的菜单）。顶栏/快捷键经保留的 NSMenu 和所属 NSView 打开真正的系统菜单，在前台执行器中释放 GPUI 更新借用后进入 AppKit 菜单循环；系统负责平铺、居中、全屏与还原选项。
- - Windows 使用透明的 GPUI 组件标题栏，顶栏空白区域按 ashell 同类方式在拖动阈值后释放鼠标捕获并投递 `WM_SYSCOMMAND(SC_MOVE | HTCAPTION)`，避免 GPUI Windows 后端的 `start_window_move` 空实现。右侧最小化、最大化/还原、关闭按钮分别映射 `SC_MINIMIZE`、`SC_MAXIMIZE/SC_RESTORE`、`SC_CLOSE`，同时注册 `WindowControlArea::{Min,Max,Close}`；关闭仍经过应用已有的未保存变更确认。标签、控件和弹窗遮罩保持独立交互。Windows 验收需覆盖无重复 LOGO、三枚按钮、空白区拖动和双击最大化/还原。本地 Shell 选择持久化在 `Preferences.local_shell`，在 UI 线程外发现，且只作用于新建本地会话；不可用的选择明确报错，已有会话保留原 Shell。
-- `window_layout.rs`、尺寸表单和直接几何接口保留给其它平台与几何回归；macOS 日常菜单使用系统 WindowMenuProbe 和菜单只读快照。Windows 适配未实机验证，Linux 不新增本地 VM/容器。
-- 应用菜单以本地化的“关于 MantaSH / About MantaSH”为首项，接分隔线、“设置”、Services 和退出。`OpenAbout` 派发 `ShowAboutModal` 打开应用内 `Modal::About`，正文显示应用名和 `APP_VERSION`，footer 提供“检查更新”；右上角关闭或 Esc 退出。设置 footer 仅右侧“恢复默认”，不再显示版本号。
-
-## 自动更新
-
-`update.rs` 负责固定官方源的版本检查、平台资源选择、流式下载、SHA-256 校验与平台安装助手。`ui/updates.rs` 维护检查、询问、下载、准备、关闭交接和失败状态；每次下载/准备结果须匹配本次请求 ID，取消使旧结果失效。文件及进程操作在后台执行，暂存包清理也不在 GPUI 主线程执行。
-
-关于弹窗 footer 的“检查更新”进入手动模式，显示检查中、无适用更新、发现新版本或失败；正在进行的自动请求可以被手动接管而不重复发起。手动请求不受本次已取消版本集合抑制；确认弹窗保存关于父页面，取消时先使请求 ID 失效再返回关于弹窗。`cargo test --locked --lib ui::updates::tests` 覆盖结果模式、重复请求、取消与迟到结果。
-
-`CloseTarget::Update` 复用草稿和传输的关闭保护；保存草稿时保留更新同意，取消则清除待更新关闭目标。工作区成功保存后才启动安装助手，助手等待应用退出后安装，启动助手本身不代表安装成功。原生 QA 可运行 `python3 scripts/qa_updates_macos.py --binary target/debug/mantash --directory <全新隔离目录>`，需要较旧的 debug 二进制和可访问 GitHub 的网络，仅检查提示、延后显示与取消，不确认下载或安装。完整测试边界见[自动更新](updates.md)。
-
-## 共享命令历史
-
-`HistoryScope` 将 local 与 `ssh:<profile UUID>` 记录映射为本地与共享 SSH 两份逻辑列表，保留存储中的源 UUID，不改写已有记录。`ui/history.rs` 的 HistoryView 在 Workbench 中按范围持有搜索、滚动和多选选区，SSH 标签不各自持有。历史来源不决定执行位置：行操作捕获当前 Owner，直接执行再次验证 attempt 与可靠 Shell 提示符后，把命令粘贴并提交到该终端。弹窗排版与选择语义见[设计规范](design.md#共享-ssh-历史)。
-
-`tests/shared_history.rs` 验证跨来源 SSH 记录重启后合并为同一共享列表、时间顺序、本地隔离与按 UUID 精确删除；local 记录与畸形来源不进入共享列表。原生驱动 HistoryFixture 创建断线视图后直接打开历史弹窗，HistoryQuery/HistoryScroll 验证共享浏览状态，不连接 SSH。
-
-## 本地自动凭据记忆
-
-`vault.rs` 实现无版本号的单一凭据格式（魔数 `MantaSH local credentials` 标识）：系统随机源生成的本机 256 位密钥与 [RustCrypto AES-GCM](https://docs.rs/aes-gcm/0.11.1/aes_gcm/)，每次写入独立 nonce；key 文件由 tempfile 的 `persist_noclobber` 发布，已存在时复用，不生成替代 key。数据文件与保护范围见[数据文档](data.md#凭据)。
-
-- `Backend` 持有 LocalVault，所有文件、数据库和加密操作在后台线程执行。正常 SSH 流程只在主机验证后读取凭据，认证成功后自动写入；无主密码、不调用系统钥匙串、无“记住密码”选项，错误密码不覆盖已保存值。
-- 编辑已保存连接时 `profile_form` 生成新的请求 UUID 并在后台调用 `SecretStore::read`；结果仅在请求仍对应当前表单、认证方式未改变且用户输入仍为空时填入可见密码字段。QA 只导出 `secret_present`/`secret_loading` 布尔状态，不导出密码内容；克隆路径使用 `profile_form_without_secret`。
-- `tests/automatic_vault.rs` 验证自动保存与重启读取、并发首次保存、key 丢失/损坏、nonce、UUID 绑定与按 UUID 删除；`tests/support/credential_reconnect.rs` 验证主机确认前不读凭据、认证成功后保存并复用、拒绝后手动更正、取消旧回复和凭据库失败。`scripts/qa_credentials_macos.py run` 使用隔离的本地加密密码库完成密码保存、重连、新开实例及实际重启后的直接复用。
+`ssh_sftp` 在回环地址启动随机口令/密钥的测试服务器，SFTP 桥接系统 OpenSSH，读写真实临时文件；这是测试工具，正式应用只作 SSH 客户端。`processes` 的 Linux 条件测试仅操作自己创建的 `sleep 30` 子进程。新增 Linux 验证只使用用户指定的远程环境，禁止创建或运行本地 Linux VM/容器。Windows x86/x64/ARM64、ConPTY、DPI、输入法和安装体验仍未实机验收。
 
 ## 原生视图驱动（debug QA）
 
-仅 debug 构建在同时显式设置 `MANTASH_QA_CONTROL` 与同一目录下的 `MANTASH_DATA_DIR` 时启用；正常启动不读取控制文件。驱动使用真实视图动作和真实后端，不绕过生产主机验证，只允许为回环测试连接填入资料。驱动启动时忽略控制文件中上一次的请求，避免重放 Type 或 Quit；`state.json` 包含隔离会话的可见终端输出，只用于测试数据，不能提交真实用户内容。
+驱动只编译进 debug 构建，并要求显式设置绝对路径 `MANTASH_QA_CONTROL` 和位于其父目录下的 `MANTASH_DATA_DIR`。正常启动不读取控制文件。重启会忽略旧请求序号，避免重放 Type/Quit。驱动使用真实视图动作和后端，不绕过主机验证；连接资料和凭据入口只接受专用回环目标。合成系统采样由明确的隔离 fixture 动作提供，不能接入正式会话。
+
+### 手动启动与控制
+
+以下 macOS/Unix 示例在全新临时目录运行一个 debug 程序。第一终端打印的目录供控制脚本使用；保留构建产物路径，不覆盖 HOME 等系统环境变量。
 
 ```sh
-MANTASH_DATA_DIR="$TMPDIR/mantash-ui-qa/data" \
-MANTASH_QA_CONTROL="$TMPDIR/mantash-ui-qa/command.json" \
-cargo run --locked
+cargo build --locked
+mantash_binary="$PWD/target/debug/mantash"
+mantash_qa="$(mktemp -d "${TMPDIR:-/tmp}/mantash-ui-qa.XXXXXX")"
+printf '%s\n' "$mantash_qa"
+(
+  cd "$mantash_qa"
+  MANTASH_DATA_DIR="$mantash_qa/data" \
+  MANTASH_QA_CONTROL="$mantash_qa/command.json" \
+  "$mantash_binary"
+)
 ```
 
-另一个终端中：
+第二终端回到仓库根目录，把变量设为刚才打印的实际目录，再发送动作：
 
 ```sh
-python3 scripts/qa_control.py settings
-python3 scripts/qa_control.py font_sizes --data '{"ui":18,"terminal":17}'
-python3 scripts/qa_control.py resize --data '{"width":960,"height":640}'
-python3 scripts/qa_control.py scroll_modal --data '{"y":-500}'
-python3 scripts/qa_control.py keystroke --data '{"key":"tab"}'
-python3 scripts/qa_control.py theme --data '{"night":true}'
-python3 scripts/qa_control.py dismiss
+mantash_qa="/实际的隔离目录"
+python3 scripts/qa_control.py settings --directory "$mantash_qa"
+python3 scripts/qa_control.py font_sizes --directory "$mantash_qa" --data '{"ui":18,"terminal":17}'
+python3 scripts/qa_control.py keystroke --directory "$mantash_qa" --data '{"key":"tab"}'
+python3 scripts/qa_control.py draw --directory "$mantash_qa"
+python3 scripts/qa_control.py dismiss --directory "$mantash_qa"
 ```
 
-另有 `focus_pane、close_pane、panel_width、hide_tool、reopen_tool、system_page、refresh_monitor、reconnect、local/split/profile/submit_profile/trust` 等定向动作。
+[qa_control.py](../scripts/qa_control.py) 还提供 `resize`、`theme`、`local`、`split`、`focus_pane`、`close_pane`、`profile`、`submit_profile`、`trust`、`reconnect`、`hide_tool`、`reopen_tool` 等动作，具体参数见 `src/ui/qa.rs`。每个应用使用自己的目录，脚本始终显式传 `--directory`。`MANTASH_QA_BACKGROUND=1` 不主动激活窗口；`MANTASH_QA_HIDDEN=1` 隐藏窗口但仍运行原生分发和真实 PTY，只用于适合隐藏运行的检查。
 
-- 命令确认只表示动作已接收。异步连接、读取或保存必须继续检查 `state.json` 直到期望状态出现；窗口调整后等实际尺寸稳定再截图。`MANTASH_QA_BACKGROUND=1` 令 QA 窗口不主动激活，`MANTASH_QA_HIDDEN=1` 进一步隐藏窗口（仍运行原生键盘分发和真实 PTY，不用于视觉截图验收）。
-- 键盘使用公开且返回 bool 的 `Window::dispatch_keystroke`，经 `window.defer` 延迟分发避免仍持有 Workbench 更新借用时回调同一视图；`keystroke` 经过原生焦点树、键绑定和输入事件，不能用 `type` 写入制表符代替键盘回归。鼠标不注入：GPUI 原始 `dispatch_event` 返回私有类型，驱动不通过修改依赖或不安全代码绕过；`pointer_gesture` 只把 AppKit 事件投递给隔离测试窗口的明确窗口号。物理键鼠和系统输入法界面单独验收。
-- 隐藏窗口做尺寸检查时，在更改字号/主题后用 `draw` 请求原生绘制（调用公开 `Window::draw` 并释放绘制 arena，不发送输入；F12 会发送 VT 序列、模拟 `shift` 可能被转成文本，均不可代替），等待实际边界更新后再比较；布局检查需完成两次 `draw`，在前一轮定位完成前设置滚动偏移会把测试时序混入用户滚动场景。原生截图做像素比较前须按内嵌 ICC 色彩配置转换到 sRGB；macOS 锁屏时记录截图待补，不将旧图改名冒充。
-- 测试驱动的系统页切换必须经 `set_active_tool`，与真实按钮共用 last_tool 记忆；`panel_width` 只检查偏好计算，`resource_details` 等场景构造动作不代表物理点击；组合输入动作只证明组合/提交/取消的数据流，不证明系统候选框。
+命令回执只代表已接收。连接、读取、保存、退出及几何调整要继续等待 `state.json` 中的目标状态；不能用固定延迟或请求接受代替完成。可观察 `profile_order`、`file_request`/`file_loading`、`file_tree_loading`/`file_tree_rows` 及路径输入框的值/焦点/边界，文件路径回车用 `file_path_input` 配合 `keystroke` 检查。状态含隔离终端可见输出，只允许测试内容，控制文件、状态、临时凭据和日志不提交。
 
-长期原生验收服务器（唯一被 ignore 的测试是测试工具，不是未通过而被忽略的产品测试）：
+### 回环 SSH/SFTP fixture
+
+另开终端，在仓库根目录启动长期 fixture：
 
 ```sh
-MANTASH_FIXTURE_DIR="$TMPDIR/mantash-ui-qa" \
-cargo test --locked --no-default-features --test ssh_sftp native_qa_fixture -- --ignored --nocapture
+mantash_fixture="$(mktemp -d "${TMPDIR:-/tmp}/mantash-fixture.XXXXXX")"
+printf '%s\n' "$mantash_fixture"
+MANTASH_FIXTURE_DIR="$mantash_fixture" MANTASH_FIXTURE_PASSWORD=1 \
+  cargo test --locked --no-default-features --test ssh_sftp native_qa_fixture -- --ignored --nocapture
 ```
 
-提供随机口令/密钥与临时目录，最长 45 分钟，可在指定目录创建 `stop-fixture` 文件提前停止；期间不得连接生产主机。
+该 ignored 项是显式启动的服务器工具，不是被跳过的失败产品测试。最长运行 45 分钟，在其目录创建 `stop-fixture` 可提前停止。`fixture.json`/`profile.json` 给出临时根路径与回环资料；`MANTASH_FIXTURE_PASSWORD=1` 仅把随机密码写入 fixture 的 0600 文件。脚本先通过生产主机确认，再经回环凭据入口读取密码文件，不把密码值写入控制 JSON、状态或报告。此服务器并非文件系统沙箱，测试必须只操作指定 fixture 根下的文件，不连接生产主机。
+
+在脚本终端把 `mantash_fixture` 设为这里打印的实际目录。依赖已运行窗口的脚本用应用目录与 fixture 目录两组参数，例如：
+
+```sh
+mantash_fixture="/实际的fixture目录"
+python3 scripts/qa_file_actions_macos.py --directory "$mantash_qa" --fixture "$mantash_fixture"
+```
+
+传输脚本还要求在**启动 QA 应用的终端**设置同一个 `mantash_fixture` 路径，并将 `MANTASH_QA_REMOTE_ROOT` 设为 `fixture.json` 中 root 的真实路径，再启动应用：
+
+```sh
+export MANTASH_QA_REMOTE_ROOT="$(python3 -c 'import json, pathlib, sys; print(pathlib.Path(json.loads(pathlib.Path(sys.argv[1]).read_text())["root"]).resolve())' "$mantash_fixture/fixture.json")"
+```
+
+macOS 的 `/var` 与 `/private/var` 必须统一为解析后的路径。`stage_transfer` 只替代系统路径选择器，本地目标须位于 QA 目录、远端目标须在回环 fixture 根下；确认、取消、重试仍走正式入口。它不构成系统文件选择对话框的物理鼠标验收。
 
 ## 原生 QA 脚本索引
 
-除特别说明外，脚本均接受 `--directory <全新隔离 QA 目录>`；需要回环服务器的另加 `--fixture <fixture 目录>`（由上一节的 native_qa_fixture 启动）。
+脚本路径均可点击查看参数。自行启动应用的脚本通常要求 `--binary target/debug/mantash --directory <尚不存在的目录>`；连接现有窗口的脚本要求 `--directory <已运行的隔离目录>`。使用 fixture 的行另加 `--fixture <fixture 目录>`。各场景用独立目录，恢复阶段才复用同一目录；不要把同一窗口同时交给多个驱动。
 
-| 脚本 | 覆盖 |
+| 脚本 | 启动方式与依赖 | 覆盖与限制 |
+|---|---|---|
+| [qa_smoke.py](../scripts/qa_smoke.py) | 现有窗口 + fixture；部分断言待适配 | 先准备第一个标签的 5 个本地窗格、第二个已信任并认证的回环 SSH 标签；分屏、面板、SFTP 与草稿冒烟，保留旧工作页断言 |
+| [qa_accept_macos.py](../scripts/qa_accept_macos.py) | 现有窗口 + fixture；`exercise` / `restore`，部分断言待适配 | 组合输入、五窗格、文件重读/覆盖和恢复场景；两阶段间实际退出并重启，编辑器工作页断言需适配当前弹窗 |
+| [qa_completion_macos.py](../scripts/qa_completion_macos.py) | 现有窗口，真实本地 Shell | 文件/中文路径/目录/命令补全、前台 Backtab、组合输入保护及表单导航 |
+| [qa_tabs_macos.py](../scripts/qa_tabs_macos.py) | 现有窗口 | 动态名称、滚动边界、后台输出、活动标签及窗口尺寸；几何来自原生预绘制 |
+| [qa_tab_reorder_macos.py](../scripts/qa_tab_reorder_macos.py) | 自行启动 | 排序、栏外/Esc 取消、关闭、滚动、字号和保存；先等待 AppKit 查询原生区域，再比较 GPUI 边界及投递指针事件 |
+| [qa_terminal_boundaries.py](../scripts/qa_terminal_boundaries.py) | 自行启动 + Node.js；可传 `--shell` | 两种尺寸下不足/恰好/超出视口、首尾可达、清屏和 Vite 式刷新；Windows 必须指定 Git Bash，报告实际平台/Shell |
+| [qa_terminal_scroll_macos.py](../scripts/qa_terminal_scroll_macos.py) | 自行启动；另传 `--vite-cli <vite/bin/vite.js>`，需 Node.js/npm | 真实 Vite、隔离 zsh 右提示符、缩放、标签切换、溢出回滚和运行中清屏；记录网格、历史、滑块及外层滚动几何 |
+| [qa_file_rows_macos.py](../scripts/qa_file_rows_macos.py) | 现有窗口 + fixture | 单选、范围/增量选择、隐藏过滤、导航、键盘和批量确认；行事件含 session/attempt/request |
+| [qa_file_actions_macos.py](../scripts/qa_file_actions_macos.py) | 现有窗口 + fixture | 固定本行复制/删除、跨目录粘贴、冲突、旧 request/attempt 拒绝及重命名后草稿保存 |
+| [qa_editor_format_macos.py](../scripts/qa_editor_format_macos.py) | 现有窗口 + fixture | 真实 SFTP、Unicode 反向选区、滚动、独立撤销/重做、相邻输入、草稿收起和 IME 门禁；结果只导出内容哈希 |
+| [qa_transfers_macos.py](../scripts/qa_transfers_macos.py) | 现有窗口 + fixture；应用启动时设置 `MANTASH_QA_REMOTE_ROOT` | 多文件/目录、字节哈希、目标绑定、覆盖失败、重试、两个并发许可和取消 |
+| [qa_modal_widths_macos.py](../scripts/qa_modal_widths_macos.py) | 自行启动 | 中英文、12/14/18px、960×640/1280×800、各类弹窗与父帧恢复；等新 `dialog_revision` 后检查实际外框、中心误差 ≤1px、边距和正文溢出 |
+| [qa_history_connection_modals_macos.py](../scripts/qa_history_connection_modals_macos.py) | 自行启动，隔离列表 fixture | 历史/连接库选区、Esc、滚动与底栏，跨标签固定列表范围、删除取消保留目标；不启动传输 |
+| [qa_history_owner_macos.py](../scripts/qa_history_owner_macos.py) | 自行启动，真实本地 PTY | 生产历史提交入口的填入/执行、切标签/窗格、隐藏父帧、重开/重连、前台程序与断线；QA 本地历史入口不改变产品入口 |
+| [qa_connection_duplicate_macos.py](../scripts/qa_connection_duplicate_macos.py) | 自行启动，回环无监听端口 | 真实 Enter 两次连接同一资料生成两个独立标签；连接会自行失败，不验证 SSH 成功 |
+| [qa_connection_row_width_macos.py](../scripts/qa_connection_row_width_macos.py) | 自行启动 | 行填满列表、600px 高度上限及过滤后几何 |
+| [qa_process_list_macos.py](../scripts/qa_process_list_macos.py) | 自行启动，隔离采样 | 0/3/90 行、表头对齐、筛选与稳定高度 |
+| [qa_process_details_macos.py](../scripts/qa_process_details_macos.py) | 自行启动，隔离采样 | 过期回复、两种确认取消、身份失效、长命令和原始状态；不发送真实信号 |
+| [qa_ports_macos.py](../scripts/qa_ports_macos.py) | 自行启动，隔离采样 | 0/3/5/48 行、表头/行对齐、展开/筛选/排序/复制、错误与断线 |
+| [qa_overview_layout_macos.py](../scripts/qa_overview_layout_macos.py) | 自行启动，隔离采样 | 概览模块、全宽分隔线、资源详情、滚动边界，以及公开 Space/Enter 焦点入口；不连接 Linux |
+| [qa_credentials_macos.py](../scripts/qa_credentials_macos.py) | `run --directory <新目录> --fixture <目录>`；可传 `--binary` | 自动启动和重启，验证隔离密码库保存、重连、新开实例和重启复用；`exercise` / `restore` 可接现有窗口 |
+| [qa_about_menu_macos.py](../scripts/qa_about_menu_macos.py) | 自行启动并激活窗口 | AppKit 应用菜单打开共享 About、双语、重复打开、Esc 与设置父帧恢复 |
+| [qa_settings_macos.py](../scripts/qa_settings_macos.py) | 自行启动 | 三组设置、四个 Switch 的指针/完整 Space/Enter 周期及 Tab 焦点、两主题/字号、端口 22 默认与旧字段兼容、持久化和恢复默认保留业务数据/自定义端口 |
+| [qa_updates_macos.py](../scripts/qa_updates_macos.py) | 自行启动；需低于最新稳定版的 debug 程序及 GitHub 网络 | 官方更新提示、延后显示、手动检查及取消；不确认下载或安装 |
+| [qa_stress.py](../scripts/qa_stress.py) | 现有窗口；`run --seconds 600`，可加 `--fixture` | 五窗格真实输出；有 fixture 时每五轮混合 SFTP 刷新、编辑保存和上传；窗口可见，不与其他基准并行 |
+| [qa_bundle_macos.py](../scripts/qa_bundle_macos.py) | `--bundle <debug MantaSH.app> --directory <新目录>`，可加 `--fixture` | 搬离源码后的 Launch Services 启动、资源和凭据；校验已有签名，不执行打包或签名，不代表物理双击/Gatekeeper 验收 |
+| [qa_window_controls_macos.py](../scripts/qa_window_controls_macos.py) | `--binary`、`--directory`；当前入口待适配 | 保留窗口几何、PTY 身份及重启恢复断言；脚本仍等待 `window_controls` 应用弹窗，而 macOS 当前入口为系统菜单，不能直接作为当前菜单回归通过依据 |
+| [check_overview_pixels.py](../scripts/check_overview_pixels.py) | `--image <PNG> --state <state.json>`，需 Pillow | 对同一构建的已呈现窗口截图按 ICC 转换 sRGB，检查轨道填充和网络曲线 |
+
+标为“待适配”的脚本保留作场景参考，使用前须更新其入口断言；当前文件/编辑验证优先选择上述专项脚本，窗口菜单按平台指南检查。脚本覆盖范围与实际执行结果分别记录。
+
+## 测试证据类型
+
+| 证据 | 能说明什么 | 不能代替什么 |
+|---|---|---|
+| Rust 单元/集成测试 | 模型约束、失败边界；明确使用真实 PTY/回环协议的测试可证明对应服务路径 | 原生布局、目标平台安装和人机输入体验 |
+| 正常可见窗口及截图 | 当前构建在实际桌面的呈现和指定像素结果 | 未操作的交互、隐藏窗口或另一平台 |
+| 无输入 `draw` | GPUI 实际布局、预绘制边界和滚动视口 | 键盘/指针动作、系统输入法、正常窗口连续呈现 |
+| 程序化键盘 | `Window::dispatch_keystroke` 经焦点树、键绑定和输入事件的处理 | 物理键盘、系统输入法候选框；`type` 写制表符也不能代替键盘回归 |
+| 程序化指针 | 隔离 macOS 窗口号上的 AppKit NSEvent 路由与视图响应 | 物理鼠标、Window Server 实际拖窗及系统文件选择器 |
+| 平台人工验收 | 记录的系统/架构/DPI、Shell、输入法、安装和实际操作 | 未覆盖的平台和分项故障注入 |
+
+布局更改后至少完成两次 `draw`，等待实际边界稳定，再设置滚动偏移和断言；历史高度调整、父弹窗恢复和虚拟列表尤其不能只检查目标尺寸。`draw` 使用公开 `Window::draw` 并释放绘制 arena，不发送输入；F12 会产生 VT 序列，模拟 Shift 也可能变成文本，均不可替代。键盘经 `window.defer` 分发，避免重入仍被借用的 Workbench；指针驱动不通过私有 GPUI `dispatch_event` 返回类型或依赖改造绕过接口。
+
+概览 fixture 最多提供 61 条有界样例并创建未连接会话，进程/端口另有隔离采样入口；`preview` 在 UI 与后台都禁止信号。它们验证几何与状态处理，真实 Linux 采样/信号另行验收。系统页切换经 `set_active_tool`，`panel_width` 只证明偏好计算；组合输入动作只证明组合/提交/取消数据流。
+
+报告记录源码提交或工作区差异、二进制与脚本指纹、环境、命令、预期/实际及证据类型。准备失败、驱动时序失败与产品失败分开记录；不累加不同构建的通过数。截图与状态来自同一已编译版本，锁屏不能截图时记为待补，不复用旧图。提交报告列出实际运行、未执行检查及剩余限制，平台状态统一维护在[验收说明](acceptance.md)。
+
+## 平台兼容点
+
+`ui/macos_titlebar.rs` 处理 GPUI 0.2.2 全尺寸透明标题栏：AppKit/Window Server 可能在 mouse-down 到达 GPUI 前启动拖窗，该版 `on_hit_test_window_control` 与 macOS `start_window_move` 无法提供所需覆盖。应用自有 `MantaSHTitlebarExclusionView` 按可见控件的绘制边界放置透明原生区域，`hitTest:` 返回 nil 让输入穿透，`mouseDownCanMoveWindow` 返回 NO，`_opaqueRectForWindowMoveWhenInTitlebar` 返回 bounds，将控件区域从标题栏拖动区排除。空白处保留系统拖窗，`NSWindow.isMovable` 保持 true。
+
+区域按标签滚动视口裁剪并转换坐标，稳定排序、复用，关闭时解除附着，持有 GPUIView 弱引用并有 RAII 兜底；仅几何变化时暂时切换并立即恢复 `movableByWindowBackground` 刷新 AppKit 缓存，两次设置间不分发事件。顶栏只转发一次 `titlebar_double_click`，避免重复 Zoom。这是未公开的 AppKit 兼容点，升级 macOS/GPUI 后须复查；参考 [Firefox 原生区域机制](https://github.com/mozilla/gecko-dev/blob/8f0a87156f64f797a45e2773654538b0e99904d7/widget/cocoa/nsCocoaWindow.mm)和[新版 GPUI 标题栏处理](https://github.com/zed-industries/zed/blob/72c53bf0aae2e619f146d96415f79caf77310455/crates/gpui_macos/src/window.rs)，实现不修改系统或 GPUI 类。
+
+`install_system_menu` 显式注册本地化 `NSApplication.windowsMenu`，使用 `performMiniaturize:` / `performZoom:`；系统菜单循环在释放 GPUI 更新借用后进入。About 也先经 `App::defer`，再打开共享 `Modal::About`，避免同名父帧重复入栈。macOS 日常窗口入口使用系统菜单，直接几何接口保留给其他平台与专项回归。
+
+Windows 标题栏空白拖动达到阈值后释放捕获并投递 `WM_SYSCOMMAND(SC_MOVE | HTCAPTION)`；三枚系统按钮映射最小化、最大化/还原和关闭，并注册 `WindowControlArea`。关闭仍走草稿和传输保护；这些实现接入不代表 Windows 实机验收完成，检查入口见 [Windows 指南](windows.md)。
+
+## 依赖与本地补丁
+
+新增或升级依赖先核对功能必要性、平台支持、最低 Rust 和许可证，更新锁文件、[第三方说明](../THIRD_PARTY.md)及 [dependency-licenses.csv](dependency-licenses.csv)。[dependency_licenses.py](../scripts/dependency_licenses.py) 提供清单生成入口。SSH 使用 `russh >= 0.63.2`，Windows 间接 `pageant` 锁定 0.2.3；安全修复要求 Rust 1.89，正式产品不启动 SSH 服务端或连接 Pageant 代理。
+
+`Cargo.toml` 的 `[patch.crates-io]` 有两项本地补丁，升级前阅读其说明并验证相关调用：
+
+| 补丁 | 范围与移除条件 |
 |---|---|
-| `qa_smoke.py` | 已运行隔离窗口的冒烟：第一个标签 5 个本地窗格，第二个为 fixture 创建并信任的 SSH 会话（先用 `qa_control.py local/split/profile/submit_profile/trust` 建场景）；输出 `smoke-results.json`，须核对异步结果后才记为通过 |
-| `qa_accept_macos.py` | exercise / restore 两阶段，按阶段实际退出并重启原生程序：组合输入适配器、五窗格、右栏、在线编辑重新读取最新内容、最后保存覆盖和工作恢复 |
-| `qa_completion_macos.py` | 文件、中文文件名、目录、命令名称补全，前台程序 Backtab、组合输入保护及表单导航；使用真实本地 Shell，不需要 fixture |
-| `qa_tabs_macos.py` | 顶部标签布局回归：动态名称、滚动边界、后台输出、活动标签显示与窗口尺寸；`state.json` 的 `header` 来自原生预绘制 |
-| `qa_tab_reorder_macos.py` | 标签水平排序与 macOS 原生标题栏拖动区域（见上文） |
-| `qa_file_rows_macos.py` | 真实 SFTP 的单选、范围/增量选择、隐藏过滤、双击导航、键盘操作和批量确认快照；`file_row` 参数含 session、attempt、request |
-| `qa_transfers_macos.py` | 传输后端与确认/取消/重试入口（见上文，另需 `MANTASH_QA_REMOTE_ROOT`） |
-| `qa_modal_widths_macos.py` | 各弹窗外框宽度上限与居中误差 |
-| `qa_history_connection_modals_macos.py` | 历史与连接库弹窗隔离回归 |
-| `qa_process_list_macos.py` / `qa_process_details_macos.py` | 进程列表几何与详情身份/确认/过期回复 |
-| `qa_terminal_boundaries.py --binary <debug 程序> --directory <新目录> [--shell <Bash/Zsh 路径>]` | 通过 Node.js 和真实 PTY 检查不足、恰好及超出视口、首尾可达、清屏和 Vite 式刷新，覆盖两种窗口尺寸；Windows 必须指定 Git Bash，报告记录实际平台/Shell；不代替物理鼠标验收 |
-| `qa_ports_macos.py` | 端口列表几何、筛选、排序、展开与复制（`--binary target/debug/mantash`） |
-| `qa_overview_layout_macos.py` | 概览布局测量（`--binary <debug 可执行文件>`） |
-| `qa_connection_duplicate_macos.py` | 同一 fixture 资料经真实 Enter 连续打开两次，断言两个独立标签（回环无监听端口，会话自行失败） |
-| `qa_connection_row_width_macos.py` | 连接行宽度等于列表容器宽度、弹窗高度上限 600px、过滤后仍占满 |
-| `qa_credentials_macos.py run` | 隔离密码库的保存、重连、新开实例与重启复用 |
-| `qa_about_menu_macos.py` | AppKit 菜单、系统 About 面板与设置弹窗状态（`--binary target/debug/mantash`） |
-| `qa_stress.py run --seconds 600` | 混合负载：五窗格输出外每五轮执行 SFTP 刷新、编辑保存和上传；窗口保持可见、不与其它基准并行 |
-| `qa_bundle_macos.py` | 搬离源码目录后的 Launch Services 启动和凭据访问；不执行发布打包或签名 |
-| `check_overview_pixels.py` | 截图像素核对（`--image <PNG> --state <state.json>`，ICC→sRGB） |
+| [taffy-compat](../vendor/taffy-compat/README.md) | 保持 GPUI 所需 0.9.0 包身份，转导出固定提交的 Taffy 0.9.2，采用修复的 grid 1.x；GPUI 接受修复版后移除 |
+| [gpui-component](../vendor/gpui-component/MANTASH-PATCH.md) | 0.5.1 的显式编辑事务、选区/滚动恢复、撤销分组，以及按钮按 variant 使用 hover 前景；上游提供等价 API 后移除对应补丁，保留说明与许可证 |
 
-快照断言用字段：`profile_order`（连接库保存顺序名称列表，配合 `pointer_gesture` 真实指针路径验证拖拽排序）、`file_tree_loading`/`file_tree_rows`（树展开加载与完成）、`file_input`/`file_input_focused`/`file_input_bounds`（路径输入框与当前路径同步）；`file_path_input` 动作配合 `keystroke` 走真实键盘分发验证回车语义。原生文件选择状态由 GPUI 真实视图驱动验证：选择时只更新既有行的高亮和固定操作控件，不重建行或图标；真实鼠标单击、Shift、双击和系统文件选择器仍按平台分别验收。
+LOGO 几何源在 assets SVG，[generate_logo.py](../scripts/generate_logo.py) 用 Pillow 生成 PNG/ICO/ICNS；资源规范见[设计规范](design.md)。本地验包用 [package_release.py](../scripts/package_release.py)，DMG 验证用 [verify_macos_dmg.py](../scripts/verify_macos_dmg.py)。版本、runner 构建、签名及 [release_version.py](../scripts/release_version.py) 等发布脚本统一见[发布文档](release.md)，不把打包或 Actions 构建当作目标平台人工通过。
 
-## 自动化覆盖
-
-- core：CSV 导入导出与合并、凭据字段隔离、编码/BOM、二进制拒绝、跨包多字节、ANSI 选区搜索、控制键、历史 nonce、SQLite 损坏保留、焦点恢复、Linux 采样差值、路径和终态。
-- shared_history：跨来源 SSH 记录重启后合并为同一共享列表、按 UUID 精确删除、同一命令折叠为最新一条；local 记录与畸形来源不进入共享列表。
-- local_pty：真实 OS Shell 的输入、输出、连续 resize 与关闭（Unix 非阻塞循环见上文）。
-- ssh_sftp：仅监听回环地址的临时 SSH 服务器，验证指纹和密码认证顺序；SFTP 请求桥接系统 OpenSSH 的 `sftp-server`，读写真实临时文件，覆盖外部修改后重读、最后保存覆盖、权限失败、目录传输、符号链接拒绝、取消和原内容保留。测试口令随机生成，不输出内容。
-- terminal_updates：合并通知在多线程输出下保持一次唤醒、消费后重新唤醒，增量帧与完整帧逐格一致，单行更新复制量、触控板累计及修饰功能键；真实 PTY 场景验证输出通知不依赖 UI 定时轮询。
-- layout_storage：最多五个叶子、关闭不丢失、损坏图恢复、偏好宽度、无标记文件采纳格式标记与其它标记拒绝。
-- processes：采样前后身份一致、保护 PID、编码详情、信号枚举、未知结果以及 macOS 拒绝 Linux 操作；Linux 条件测试只创建自己的 `sleep 30` 子进程验证失效身份拒绝、TERM/KILL 和实际退出，不操作生产进程（当前开发机不运行该条件测试）。
-
-正常原生窗口、无输入 `draw`、程序化键盘、指针驱动和平台人工验收是不同证据，不能互相冒充；测试请求被接受不代表异步操作或布局已经完成。
-
-## 依赖、资源与发布
-
-- 保留锁文件。新增或升级依赖前检查平台支持、最低 Rust 版本、许可证与功能必要性，并同步第三方清单（`docs/dependency-licenses.csv`）。
-- SSH 依赖要求 `russh >= 0.63.2`，Windows 间接依赖 `pageant` 锁定为 `0.2.3`；两者的安全修复要求 Rust 1.89，CI 与发布构建使用该工具链。正式功能仅使用 SSH 客户端密码认证，不启动 SSH 服务端或连接 Pageant 代理。
-- LOGO 源几何在 assets SVG，`scripts/generate_logo.py`（Pillow）按同一 64 单位几何生成各尺寸 PNG、ICO 和 ICNS；只是资源生成，不是应用打包。品牌规范见[设计规范](design.md#品牌资源)。
-- 本地开发与调试运行 `cargo run --locked`（[macOS 指南](macos.md)、[Windows 指南](windows.md)）；`scripts/package_release.py` 可在对应平台配合已构建二进制做本地验包，正式公开发布由 GitHub runner 完成。公开版本使用 `scripts/release_version.py` 从 `Cargo.toml` 基准版本和既有 tag 计算下一个 `vX.Y.Z` 并在构建前验证输入；`release.yml` 在 runner 上临时把 `Cargo.toml`、`Cargo.lock` 和 `docs/dependency-licenses.csv` 同步为 tag 版本后编译，主分支不产生版本提交。完整触发方式和产物边界见[发布文档](release.md)；GitHub Actions 交叉编译通过不等于目标平台人工验收通过。
-- 提交遵守[贡献指南](../CONTRIBUTING.md)和 [AI 规范](../AGENTS.md)。
+开始修改前确认工作区已有改动与授权范围；代码沿用架构边界，新增文案进入 `src/ui/i18n.rs`，控件走统一包装层及 `theme::SPACE_*`。按功能维护文档和提交要求见[贡献指南](../CONTRIBUTING.md)，自动化协作者遵守 [AGENTS.md](../AGENTS.md)。

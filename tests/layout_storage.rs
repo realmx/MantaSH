@@ -39,7 +39,7 @@ fn mixed_local_tree_caps_and_closes_without_replacing_other_panes() {
 }
 #[test]
 fn unstamped_databases_adopt_the_format_stamp_and_others_are_rejected() {
-    // An unstamped database (fresh or from the brief stamp-less build) adopts stamp 1.
+    // Known unstamped schema is backed up and upgraded to format 2.
     let dir = tempfile::tempdir().unwrap();
     let conn = Connection::open(dir.path().join("mantash.sqlite3")).unwrap();
     conn.execute_batch("CREATE TABLE records(kind TEXT,id TEXT,data TEXT,PRIMARY KEY(kind,id));CREATE TABLE trust(host TEXT,port INTEGER,fingerprint TEXT,PRIMARY KEY(host,port));PRAGMA user_version=0;").unwrap();
@@ -56,7 +56,7 @@ fn unstamped_databases_adopt_the_format_stamp_and_others_are_rejected() {
     assert_eq!(
         conn.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))
             .unwrap(),
-        1
+        2
     );
     // Any other stamp is rejected without touching the file.
     let foreign = tempfile::tempdir().unwrap();

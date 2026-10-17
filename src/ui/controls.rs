@@ -1,21 +1,31 @@
-//! MantaSH buttons retain native component focus/click semantics with explicit typography and colors.
+//! Shared native controls with consistent focus, pointer feedback, typography and colors.
+use super::theme::ButtonTone;
 use gpui::prelude::*;
 use gpui::*;
 use gpui_component::{
     Disableable, Icon, IconName, Selectable, Sizable,
     button::{Button as NativeButton, ButtonCustomVariant, ButtonVariants},
     menu::{DropdownMenu, PopupMenu},
+    switch::Switch as NativeSwitch,
 };
 use std::rc::Rc;
 
-#[derive(Clone, Copy)]
-enum Tone {
-    Normal,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Appearance {
+    Solid,
     Ghost,
-    Primary,
-    Danger,
     TabLabel,
     TabClose,
+}
+
+/// Both native and lightweight buttons consume the same resolved state colors.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ButtonPaint {
+    background: Hsla,
+    foreground: Hsla,
+    border: Hsla,
+    hover: Hsla,
+    active: Hsla,
 }
 
 #[derive(IntoElement)]
@@ -30,9 +40,8 @@ pub(super) struct Button {
     /// Arbitrary element rendered in place of the icon glyphs, keeping the
     /// button's own box so neighbors never shift (spinner swap).
     icon_element: Option<AnyElement>,
-    /// Explicit icon color, independent of the label foreground.
-    icon_color: Option<Hsla>,
-    tone: Tone,
+    tone: ButtonTone,
+    appearance: Appearance,
     selected: bool,
     disabled: bool,
     menu: bool,
@@ -67,8 +76,8 @@ impl Button {
             icon: None,
             custom_icon: None,
             icon_element: None,
-            icon_color: None,
-            tone: Tone::Normal,
+            tone: ButtonTone::Default,
+            appearance: Appearance::Solid,
             selected: false,
             disabled: false,
             menu: false,
@@ -104,17 +113,89 @@ impl Button {
             _ => None,
         }
     }
+    fn colors(&self) -> ButtonPaint {
+        let p = self.palette;
+        let transparent = gpui::black().opacity(0.);
+        let colors = p.buttons.get(self.tone);
+        let mut paint = match self.appearance {
+            Appearance::Solid => ButtonPaint {
+                background: colors.background,
+                foreground: colors.foreground,
+                border: if self.tone == ButtonTone::Default {
+                    p.border
+                } else {
+                    colors.background
+                },
+                hover: colors.hover,
+                active: colors.active,
+            },
+            Appearance::Ghost => ButtonPaint {
+                background: transparent,
+                foreground: colors.ink,
+                border: transparent,
+                hover: if self.tone == ButtonTone::Default {
+                    p.tab_hover
+                } else {
+                    p.surface.blend(colors.ink.opacity(0.08))
+                },
+                active: if self.tone == ButtonTone::Default {
+                    p.tab_selected
+                } else {
+                    p.surface.blend(colors.ink.opacity(0.14))
+                },
+            },
+            Appearance::TabLabel | Appearance::TabClose => ButtonPaint {
+                background: transparent,
+                foreground: if self.appearance == Appearance::TabLabel && self.selected {
+                    p.text
+                } else {
+                    p.muted
+                },
+                border: transparent,
+                hover: if self.appearance == Appearance::TabClose {
+                    p.tab_close_hover
+                } else {
+                    transparent
+                },
+                active: if self.appearance == Appearance::TabClose {
+                    p.tab_close_hover
+                } else {
+                    transparent
+                },
+            },
+        };
+        if self.selected {
+            paint.background = paint.active;
+            paint.hover = paint.active;
+        }
+        // Disabled is the same neutral state for all five tones and wins over
+        // selection. No icon or lightweight rendering path may keep a live color.
+        if self.disabled {
+            paint.foreground = p.muted;
+            paint.background = if self.appearance == Appearance::Solid {
+                p.background
+            } else {
+                transparent
+            };
+            paint.border = if self.appearance == Appearance::Solid {
+                p.border
+            } else {
+                transparent
+            };
+            paint.hover = paint.background;
+            paint.active = paint.background;
+        }
+        paint
+    }
+
     /// Chromeless body: an interactive div with the same affordances (cursor,
     /// hover/press backgrounds, tooltip, icon and label) but no focus target.
     fn render_chromeless(mut self) -> impl IntoElement {
-        let foreground = if self.disabled {
-            self.palette.muted
-        } else {
-            self.palette.text
-        };
+        let colors = self.colors();
+        let foreground = colors.foreground;
         let icon_size = (self.font_size + 2.).min(20.);
         let tooltip = self.tooltip.clone();
-        let click = self.click.clone();
+        let click = self.click.clone().filter(|_| !self.disabled);
         let size = self.base.style().size.clone();
         let width = Self::styled_pixels(&size.width);
         let height = Self::styled_pixels(&size.height);
@@ -132,6 +213,9 @@ impl Button {
             .rounded(px(4.))
             .text_size(px(self.font_size))
             .text_color(foreground)
+            .bg(colors.background)
+            .border_1()
+            .border_color(colors.border)
             .when_some(tooltip, |d, tooltip| {
                 d.tooltip(move |window, cx| {
                     gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
@@ -140,16 +224,18 @@ impl Button {
             .when_some(click, |d, click| {
                 d.on_click(move |event: &ClickEvent, window, cx| click(event, window, cx))
             })
-            .hover(|style| style.bg(self.palette.tab_hover))
-            .active(|style| style.bg(self.palette.selected))
+            .when(!self.disabled, |d| {
+                d.hover(|style| style.bg(colors.hover))
+                    .active(|style| style.bg(colors.active))
+            })
             .when_some(self.icon_element.take(), |d, element| d.child(element))
             .when(!has_icon_element, |d| {
                 d.when_some(self.icon, |d, icon| {
-                    let icon = gpui_component::Icon::new(icon).size(px(icon_size));
-                    d.child(match self.icon_color {
-                        Some(color) => icon.text_color(color),
-                        None => icon,
-                    })
+                    d.child(
+                        gpui_component::Icon::new(icon)
+                            .size(px(icon_size))
+                            .text_color(foreground),
+                    )
                 })
                 .when_some(self.custom_icon.take(), |d, path| {
                     d.child(
@@ -157,7 +243,7 @@ impl Button {
                             .path(path)
                             .flex_none()
                             .size(px(icon_size))
-                            .text_color(self.icon_color.unwrap_or(foreground)),
+                            .text_color(foreground),
                     )
                 })
             })
@@ -168,13 +254,21 @@ impl Button {
             .when(!self.disabled, |d| d.cursor_pointer())
     }
     pub fn primary(mut self) -> Self {
-        self.tone = Tone::Primary;
+        self.tone = ButtonTone::Primary;
+        self
+    }
+    pub fn success(mut self) -> Self {
+        self.tone = ButtonTone::Success;
+        self
+    }
+    pub fn warning(mut self) -> Self {
+        self.tone = ButtonTone::Warning;
         self
     }
     /// Align contextual menu icons and labels in consistent full-width rows.
     pub fn menu(mut self) -> Self {
         self.menu = true;
-        self.tone = Tone::Ghost;
+        self.appearance = Appearance::Ghost;
         self.base = self
             .base
             .w_full()
@@ -183,7 +277,7 @@ impl Button {
         self
     }
     pub fn ghost(mut self) -> Self {
-        self.tone = Tone::Ghost;
+        self.appearance = Appearance::Ghost;
         self
     }
     /// Use an app-served SVG asset for icons missing from the upstream icon set.
@@ -199,17 +293,19 @@ impl Button {
     }
     /// Let the parent tab own selection and hover; keep the label's native focus behavior.
     pub fn tab_label(mut self, selected: bool) -> Self {
-        self.tone = Tone::TabLabel;
+        self.appearance = Appearance::TabLabel;
+        self.tone = ButtonTone::Default;
         self.selected = selected;
         self
     }
     /// A compact close affordance gets its own neutral hover only inside the tab.
     pub fn tab_close(mut self) -> Self {
-        self.tone = Tone::TabClose;
+        self.appearance = Appearance::TabClose;
+        self.tone = ButtonTone::Default;
         self
     }
     pub fn danger(mut self) -> Self {
-        self.tone = Tone::Danger;
+        self.tone = ButtonTone::Danger;
         self
     }
     pub fn selected(mut self, selected: bool) -> Self {
@@ -222,11 +318,6 @@ impl Button {
     }
     pub fn icon(mut self, icon: IconName) -> Self {
         self.icon = Some(icon);
-        self
-    }
-    /// Color only the icon, e.g. a red disconnect glyph on a neutral ghost button.
-    pub fn icon_color(mut self, color: Hsla) -> Self {
-        self.icon_color = Some(color);
         self
     }
     pub fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
@@ -251,34 +342,18 @@ impl RenderOnce for Button {
         if self.chromeless {
             return self.render_chromeless().into_any_element();
         }
-        let foreground = if self.disabled {
-            self.palette.muted
-        } else {
-            match self.tone {
-                Tone::Primary => self.palette.surface,
-                Tone::Danger => gpui::white(),
-                Tone::TabLabel if !self.selected => self.palette.muted,
-                Tone::TabClose => self.palette.muted,
-                _ => self.palette.text,
-            }
-        };
+        let colors = self.colors();
+        let foreground = colors.foreground;
         // Decide before the chain moves the field into the element swap.
         let has_icon_element = self.icon_element.is_some();
-        let mut base = match self.tone {
-            Tone::Normal => self.base,
-            Tone::Ghost => self.base.ghost(),
-            Tone::Primary => self.base.primary(),
-            Tone::Danger => self.base.danger(),
-            Tone::TabLabel => self
-                .base
-                .custom(ButtonCustomVariant::new(cx).foreground(foreground)),
-            Tone::TabClose => self.base.custom(
-                ButtonCustomVariant::new(cx)
-                    .foreground(foreground)
-                    .hover(self.palette.tab_close_hover)
-                    .active(self.palette.tab_close_hover),
-            ),
-        };
+        let mut base = self.base.custom(
+            ButtonCustomVariant::new(cx)
+                .color(colors.background)
+                .foreground(foreground)
+                .border(colors.border)
+                .hover(colors.hover)
+                .active(colors.active),
+        );
         if let Some(tooltip) = self.tooltip.clone() {
             base = base.tooltip(tooltip);
         }
@@ -292,6 +367,14 @@ impl RenderOnce for Button {
             .child(
                 base.selected(self.selected)
                     .disabled(self.disabled)
+                    // Upstream disabled colors use opacity; pin the same neutral
+                    // paint as the lightweight path while retaining disabled input.
+                    .when(self.disabled, |button| {
+                        button
+                            .bg(colors.background)
+                            .border_color(colors.border)
+                            .text_color(foreground)
+                    })
                     .child(
                         div()
                             .flex()
@@ -302,26 +385,34 @@ impl RenderOnce for Button {
                             .gap(px(8.))
                             .text_size(px(self.font_size))
                             .text_color(foreground)
-                            .when(matches!(self.tone, Tone::TabLabel | Tone::TabClose), |d| {
-                                d.group_hover("work-tab", |style| {
-                                    style.text_color(self.palette.text)
-                                })
-                            })
+                            .when(
+                                !self.disabled
+                                    && matches!(
+                                        self.appearance,
+                                        Appearance::TabLabel | Appearance::TabClose
+                                    ),
+                                |d| {
+                                    d.group_hover("work-tab", |style| {
+                                        style.text_color(self.palette.text)
+                                    })
+                                },
+                            )
                             .when_some(self.icon_element, |d, element| d.child(element))
                             .when(!has_icon_element, |d| {
                                 d.when_some(self.icon, |d, icon| {
                                     // Icons scale with the font but never exceed the button's
                                     // visual bounds: max 20px fits a 32px button comfortably.
-                                    let icon_size = if matches!(self.tone, Tone::TabClose) {
+                                    let icon_size = if self.appearance == Appearance::TabClose {
                                         self.font_size.min(16.)
                                     } else {
                                         (self.font_size + 2.).min(20.)
                                     };
-                                    let icon = Icon::new(icon).size(px(icon_size));
-                                    d.child(match self.icon_color {
-                                        Some(color) => icon.text_color(color),
-                                        None => icon,
-                                    })
+                                    d.child(
+                                        Icon::new(icon).size(px(icon_size)).when(
+                                            self.appearance != Appearance::TabClose,
+                                            |icon| icon.text_color(foreground),
+                                        ),
+                                    )
                                 })
                                 .when_some(
                                     self.custom_icon,
@@ -333,7 +424,7 @@ impl RenderOnce for Button {
                                                 .path(path)
                                                 .flex_none()
                                                 .size(px((self.font_size + 2.).min(20.)))
-                                                .text_color(self.icon_color.unwrap_or(foreground)),
+                                                .text_color(foreground),
                                         )
                                     },
                                 )
@@ -367,5 +458,231 @@ impl RenderOnce for Button {
                     .when(!self.disabled, |o| o.cursor_pointer()),
             )
             .into_any_element()
+    }
+}
+
+/// Controlled switch: the component draws the track/thumb; this wrapper owns
+/// focus and input so pointer release, Space and Enter share one change callback.
+#[derive(IntoElement)]
+pub(super) struct Switch {
+    id: ElementId,
+    checked: bool,
+    disabled: bool,
+    focus: FocusHandle,
+    height: f32,
+    palette: super::theme::Palette,
+    tooltip: Option<SharedString>,
+    on_click: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
+}
+
+impl Switch {
+    pub fn new(
+        id: impl Into<ElementId>,
+        checked: bool,
+        focus: FocusHandle,
+        font_size: f32,
+        palette: super::theme::Palette,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            checked,
+            disabled: false,
+            focus,
+            height: (font_size * 1.45 + 2.).clamp(24., 32.),
+            palette,
+            tooltip: None,
+            on_click: None,
+        }
+    }
+
+    pub fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
+        self.tooltip = Some(text.into());
+        self
+    }
+
+    pub fn on_click(mut self, listener: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+        self.on_click = Some(Rc::new(listener));
+        self
+    }
+}
+
+impl Disableable for Switch {
+    fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+}
+
+impl RenderOnce for Switch {
+    fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+        let checked = self.checked;
+        let focused = !self.disabled && self.focus.is_focused(window);
+        let p = self.palette;
+        let click = self.on_click.filter(|_| !self.disabled);
+        let keyboard = click.clone();
+        div()
+            .id(self.id.clone())
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(44.))
+            .h(px(self.height))
+            .rounded(px(self.height / 2.))
+            .border_1()
+            .border_color(if focused {
+                p.accent
+            } else {
+                gpui::transparent_black()
+            })
+            .when(!self.disabled, |control| {
+                control
+                    .track_focus(&self.focus)
+                    .cursor_pointer()
+                    .hover(|style| style.border_color(if focused { p.accent } else { p.border }))
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        self.focus.focus(window);
+                        cx.stop_propagation();
+                    })
+            })
+            .when(self.disabled, |control| control.cursor_not_allowed())
+            .when_some(self.tooltip, |control, tooltip| {
+                control.tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx)
+                })
+            })
+            .when_some(click, |control, click| {
+                control.on_click(move |event, window, cx| {
+                    cx.stop_propagation();
+                    // GPUI also synthesizes clicks on key-up; keyboard input is handled below.
+                    if matches!(event, ClickEvent::Mouse(_)) {
+                        click(&!checked, window, cx);
+                    }
+                })
+            })
+            .when_some(keyboard, |control, keyboard| {
+                control.on_key_down(move |event, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "space" | "enter")
+                        && event.keystroke.modifiers == Modifiers::default()
+                    {
+                        cx.stop_propagation();
+                        if !event.is_held {
+                            keyboard(&!checked, window, cx);
+                        }
+                    }
+                })
+            })
+            // No inner listener: the wrapper handles release and keyboard input.
+            .child(
+                NativeSwitch::new("track")
+                    .checked(checked)
+                    .disabled(self.disabled),
+            )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::theme::{ButtonTone, Palette};
+    use super::{Appearance, Button};
+    use crate::model::Theme;
+    use gpui::{Hsla, Rgba};
+
+    const TONES: [ButtonTone; 5] = [
+        ButtonTone::Default,
+        ButtonTone::Primary,
+        ButtonTone::Success,
+        ButtonTone::Warning,
+        ButtonTone::Danger,
+    ];
+
+    fn button(palette: Palette, tone: ButtonTone) -> Button {
+        let mut button = Button::new("color-test", "Action", 14., palette);
+        button.tone = tone;
+        button
+    }
+
+    fn contrast(a: Hsla, b: Hsla) -> f32 {
+        let luminance = |color: Hsla| {
+            let color = Rgba::from(color);
+            let linear = |c: f32| {
+                if c <= 0.04045 {
+                    c / 12.92
+                } else {
+                    ((c + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+        };
+        let a = luminance(a);
+        let b = luminance(b);
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn action_text_remains_readable_in_both_themes_and_interaction_states() {
+        for theme in [Theme::Day, Theme::Night] {
+            let p = Palette::new(theme);
+            for tone in TONES {
+                for appearance in [Appearance::Solid, Appearance::Ghost] {
+                    let mut button = button(p, tone);
+                    button.appearance = appearance;
+                    let paint = button.colors();
+                    for surface in [p.background, p.surface, p.selected, p.tab_selected] {
+                        for background in [paint.background, paint.hover, paint.active] {
+                            let ratio = contrast(paint.foreground, surface.blend(background));
+                            assert!(ratio >= 4.5, "{theme:?} {tone:?}: contrast {ratio}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn presentation_preserves_tone_regardless_of_builder_order() {
+        let p = Palette::new(Theme::Day);
+        let new = || Button::new("color-test", "Action", 14., p);
+        for apply in [
+            Button::primary,
+            Button::success,
+            Button::warning,
+            Button::danger,
+        ] {
+            let ghost = apply(new()).ghost().colors();
+            assert_eq!(ghost, apply(new().ghost()).colors());
+            assert_eq!(ghost, apply(new().menu()).colors());
+            assert_eq!(ghost, apply(new().ghost().chromeless()).colors());
+            assert_ne!(ghost.foreground, new().ghost().colors().foreground);
+        }
+    }
+
+    #[test]
+    fn disabled_selection_is_neutral_for_every_tone_and_renderer() {
+        for theme in [Theme::Day, Theme::Night] {
+            let p = Palette::new(theme);
+            for appearance in [
+                Appearance::Solid,
+                Appearance::Ghost,
+                Appearance::TabLabel,
+                Appearance::TabClose,
+            ] {
+                let mut reference = button(p, ButtonTone::Default).disabled(true);
+                reference.appearance = appearance;
+                let neutral = reference.colors();
+                for tone in TONES {
+                    for selected in [false, true] {
+                        for chromeless in [false, true] {
+                            let mut button = button(p, tone).selected(selected).disabled(true);
+                            button.appearance = appearance;
+                            button.chromeless = chromeless;
+                            assert_eq!(button.colors(), neutral);
+                        }
+                    }
+                }
+                assert_eq!(neutral.background, neutral.hover);
+                assert_eq!(neutral.background, neutral.active);
+            }
+        }
     }
 }

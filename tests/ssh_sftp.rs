@@ -347,6 +347,94 @@ impl Drop for Fixture {
 }
 
 #[tokio::test]
+async fn copy_and_rename_preflight_preserve_targets_and_permissions() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let fixture = Fixture::new().await;
+    let remote = fixture.connected().await;
+    let root = fixture._directory.path().canonicalize().unwrap();
+    let source = root.join("quote' $source.txt");
+    std::fs::write(&source, b"original bytes").unwrap();
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let target = root.join("target");
+    std::fs::create_dir(&target).unwrap();
+    let source_text = source.to_string_lossy().into_owned();
+    let target_text = target.to_string_lossy().into_owned();
+    let selection = files::CopySource {
+        path: source_text.clone(),
+        directory: false,
+        symlink: false,
+    };
+    let (_, entries) = files::list(&remote, root.to_str().unwrap()).await.unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .find(|entry| entry.path == source_text)
+            .unwrap()
+            .permissions
+            .unwrap()
+            & 0o777,
+        0o640
+    );
+    files::copy(&remote, &[selection.clone()], &target_text)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(target.join(source.file_name().unwrap())).unwrap(),
+        b"original bytes"
+    );
+    assert!(
+        files::copy(&remote, &[selection.clone()], &target_text)
+            .await
+            .is_err()
+    );
+    assert!(
+        files::copy(&remote, &[selection], root.to_str().unwrap())
+            .await
+            .is_err()
+    );
+    let directory = files::CopySource {
+        path: target_text.clone(),
+        directory: true,
+        symlink: false,
+    };
+    assert!(
+        files::copy(&remote, &[directory], &target_text)
+            .await
+            .is_err()
+    );
+    let link = root.join("link");
+    symlink(&source, &link).unwrap();
+    assert!(
+        files::copy(
+            &remote,
+            &[files::CopySource {
+                path: link.to_string_lossy().into_owned(),
+                directory: false,
+                symlink: false
+            }],
+            &target_text
+        )
+        .await
+        .is_err()
+    );
+    let occupied = root.join("occupied");
+    std::fs::write(&occupied, b"keep").unwrap();
+    assert!(
+        files::rename(&remote, &source_text, occupied.to_str().unwrap())
+            .await
+            .is_err()
+    );
+    assert_eq!(std::fs::read(&occupied).unwrap(), b"keep");
+    let renamed = root.join("renamed.txt");
+    files::rename(&remote, &source_text, renamed.to_str().unwrap())
+        .await
+        .unwrap();
+    assert!(!source.exists());
+    assert_eq!(std::fs::read(&renamed).unwrap(), b"original bytes");
+    remote.cancel.cancel();
+}
+
+#[tokio::test]
 async fn credentials_wait_for_explicit_host_approval() {
     let fixture = Fixture::new().await;
     let remote = fixture.connected().await;

@@ -12,14 +12,12 @@ use parking_lot::Mutex;
 use std::{
     collections::HashMap,
     io::{Read, Write},
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+pub mod metadata;
 
 /// macOS native zoom publishes geometry on several animation frames. Keep
 /// SIGWINCH quiet until the latest frame has been stable long enough for zsh's
@@ -87,8 +85,7 @@ pub struct Backend {
     permits: Arc<tokio::sync::Semaphore>,
     pub data_directory: std::path::PathBuf,
     pub vault: Arc<crate::vault::LocalVault>,
-    layout_revision: Arc<AtomicU64>,
-    profiles_revision: Arc<AtomicU64>,
+    metadata: metadata::Queue,
 }
 impl Backend {
     /// Load on a worker before the native event loop starts. Corrupt data is never replaced.
@@ -130,12 +127,7 @@ impl Backend {
         let dir = directory.clone();
         let (database, snapshot, warning) = runtime.block_on(async {
             tokio::task::spawn_blocking(move || {
-                match Database::open(&dir).and_then(|mut db| {
-                    // Startup compaction is best-effort: a failure keeps old duplicates
-                    // visible instead of blocking the whole data directory.
-                    let _ = db.compact_history();
-                    Ok((db.load()?, db))
-                }) {
+                match Database::open(&dir).and_then(|db| Ok((db.load()?, db))) {
                     Ok((snapshot, db)) => Ok::<_, anyhow::Error>((db, snapshot, None)),
                     Err(error) => Ok((
                         Database::memory()?,
@@ -151,18 +143,19 @@ impl Backend {
             .await?
         })?;
         let (events, receiver) = async_channel::unbounded();
+        let database = Arc::new(Mutex::new(database));
+        let metadata = metadata::Queue::start(database.clone(), vault.clone(), events.clone())?;
         Ok((
             Self {
                 runtime,
-                database: Arc::new(Mutex::new(database)),
+                database,
                 events,
                 sessions: Default::default(),
                 transfers: Default::default(),
                 permits: Arc::new(tokio::sync::Semaphore::new(2)),
                 vault,
                 data_directory: directory,
-                layout_revision: Default::default(),
-                profiles_revision: Default::default(),
+                metadata,
             },
             receiver,
             snapshot,
@@ -758,20 +751,10 @@ impl Backend {
             if report.command.is_empty() {
                 continue;
             }
-            let entry = HistoryEntry {
-                id: Id::new_v4(),
-                scope: session.spec.scope(),
-                command: report.command,
-                timestamp: chrono::Utc::now().timestamp_millis(),
-            };
-            let _ = self.events.try_send(Event::History(entry.clone()));
-            let db = self.database.clone();
-            let events = self.events.clone();
-            self.runtime.spawn_blocking(move || {
-                if let Err(error) = db.lock().touch_history(&entry) {
-                    let _ = events.try_send(Event::Error(error.to_string()));
-                }
-            });
+            self.mutate_metadata(metadata::Mutation::Record(
+                session.spec.history_scope(),
+                report.command,
+            ));
         }
     }
     /// Get a specific live remote without relying on the active tab.
@@ -809,57 +792,29 @@ impl Backend {
             cancel.cancel();
         }
     }
-    /// Persist connection metadata on a worker and acknowledge failures to the UI.
-    pub fn save_profiles(&self, profiles: Vec<Profile>) {
-        let db = self.database.clone();
-        let events = self.events.clone();
-        let revision = self.profiles_revision.fetch_add(1, Ordering::SeqCst) + 1;
-        let latest = self.profiles_revision.clone();
-        self.runtime.spawn_blocking(move || {
-            let mut db = db.lock();
-            if latest.load(Ordering::SeqCst) != revision {
-                return;
-            }
-            let result = db.save_profiles(&profiles).map_err(|e| e.to_string());
-            let _ = events.try_send(Event::ProfilesSaved(result));
-        });
+    /// Submit synchronously to the FIFO; all IO and receipts happen on its worker.
+    pub fn mutate_metadata(&self, mutation: metadata::Mutation) -> Id {
+        self.metadata.submit(mutation)
     }
-    /// Persist layout in the background; writes are serialized by the database lock.
+    /// Bootstrap/QA helper; production forms submit identity-specific mutations.
+    pub fn save_profiles(&self, profiles: Vec<Profile>) -> Id {
+        self.mutate_metadata(metadata::Mutation::ReplaceProfiles(profiles))
+    }
     pub fn save_workspace(&self, prefs: Preferences, workspace: Workspace) {
-        let db = self.database.clone();
-        let events = self.events.clone();
-        let revision = self.layout_revision.fetch_add(1, Ordering::SeqCst) + 1;
-        let latest = self.layout_revision.clone();
-        self.runtime.spawn_blocking(move || {
-            let mut db = db.lock();
-            if latest.load(Ordering::SeqCst) != revision {
-                return;
-            }
-            if let Err(error) = db.save_workspace(&prefs, &workspace) {
-                let _ = events.try_send(Event::Error(error.to_string()));
-            }
-        });
+        self.mutate_metadata(metadata::Mutation::Workspace(prefs, workspace));
     }
-    /// Await this final write before quitting so a fast exit cannot lose the current layout.
+    /// The final save is a queue barrier, including earlier history and profile commits.
     pub fn final_workspace(
         &self,
         prefs: Preferences,
         workspace: Workspace,
     ) -> tokio::task::JoinHandle<Result<()>> {
-        self.layout_revision.fetch_add(1, Ordering::SeqCst);
-        let db = self.database.clone();
+        let done = self.metadata.barrier(prefs, workspace);
         self.runtime
-            .spawn_blocking(move || db.lock().save_workspace(&prefs, &workspace))
+            .spawn(async move { done.await?.map_err(anyhow::Error::msg) })
     }
-    /// Remove selected history entries using an explicit list.
-    pub fn delete_history(&self, ids: Vec<Id>) {
-        let db = self.database.clone();
-        let events = self.events.clone();
-        self.runtime.spawn_blocking(move || {
-            if let Err(error) = db.lock().delete_history(&ids) {
-                let _ = events.try_send(Event::Error(error.to_string()));
-            }
-        });
+    pub fn delete_history(&self, ids: Vec<Id>) -> Id {
+        self.mutate_metadata(metadata::Mutation::DeleteHistory(ids))
     }
     /// Load a directory, tagging the response with a unique navigation request.
     pub fn list_files(&self, owner: Owner, request: Id, path: String) {
@@ -961,25 +916,22 @@ impl Backend {
                 let remote = backend.get_remote(owner)?;
                 match operation {
                     FileOperation::Delete(paths) => files::delete(&remote, &paths).await?,
-                    FileOperation::Mkdir(path) => remote.sftp().await?.create_dir(path).await?,
-                    FileOperation::Rename(from, to) => {
+                    FileOperation::Mkdir(path) => {
+                        files::validate_delete_target(&path)?;
                         let sftp = remote.sftp().await?;
-                        if sftp.try_exists(&to).await? {
-                            bail!("Rename target already exists");
+                        if !sftp
+                            .symlink_metadata(files::parent(&path))
+                            .await?
+                            .file_type()
+                            .is_dir()
+                        {
+                            bail!("Target parent is not a regular directory");
                         }
-                        sftp.rename(from, to).await?;
+                        sftp.create_dir(path).await?;
                     }
-                    // SFTP has no server-side copy; the same verified session
-                    // runs a quoted `cp -R` instead, checked by exit status.
+                    FileOperation::Rename(from, to) => files::rename(&remote, &from, &to).await?,
                     FileOperation::Copy(sources, target) => {
-                        let mut command = String::from("cp -R --");
-                        for source in &sources {
-                            command.push(' ');
-                            command.push_str(&shell_quote(source));
-                        }
-                        command.push(' ');
-                        command.push_str(&shell_quote(&target));
-                        remote.run(&command).await?
+                        files::copy(&remote, &sources, &target).await?
                     }
                 }
                 Ok::<_, anyhow::Error>(())
@@ -1113,16 +1065,17 @@ impl Backend {
     }
 }
 
+#[derive(Clone)]
 pub enum FileOperation {
     Delete(Vec<String>),
     Mkdir(String),
     Rename(String, String),
     /// Copy source entries verbatim into the target directory.
-    Copy(Vec<String>, String),
+    Copy(Vec<files::CopySource>, String),
 }
 
 /// Quote one path for a POSIX shell command line: single-quote wrapping with
 /// the embedded-quote escape, so no metacharacter in a name can break out.
-fn shell_quote(path: &str) -> String {
+pub(crate) fn shell_quote(path: &str) -> String {
     format!("'{}'", path.replace('\'', "'\\''"))
 }

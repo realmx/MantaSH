@@ -6,6 +6,7 @@ import json
 import shutil
 from pathlib import Path
 import time
+import uuid
 
 from qa_accept_macos import Acceptance
 
@@ -54,8 +55,8 @@ class TransferAcceptance(Acceptance):
         profile=json.loads((self.fixture/'profile.json').read_text())['profile']
         if profile['host'] not in ['127.0.0.1','::1','localhost']:
             raise AssertionError('Use only the task-owned loopback server')
-        remote=Path(json.loads((self.fixture/'fixture.json').read_text())['root']).resolve()/('transfer-acceptance-'+self.root.name)
-        remote.mkdir(exist_ok=True)
+        remote=Path(json.loads((self.fixture/'fixture.json').read_text())['root']).resolve()/('transfer-acceptance-'+uuid.uuid4().hex)
+        remote.mkdir()
         local=self.root/'uploads'
         local.mkdir(exist_ok=True)
         (local/'tree/nested').mkdir(parents=True,exist_ok=True)

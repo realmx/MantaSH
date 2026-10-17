@@ -10,6 +10,79 @@ pub(super) const SPACE_CONTROL: f32 = 8.;
 pub(super) const SPACE_PANEL: f32 = 12.;
 pub(super) const SPACE_SECTION: f32 = 16.;
 
+/// The only action colors. Ghost/menu/tab treatments are presentation, not tones.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum ButtonTone {
+    #[default]
+    Default,
+    Primary,
+    Success,
+    Warning,
+    Danger,
+}
+
+/// Opaque filled states plus readable ink for transparent icon/menu buttons.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ButtonColors {
+    pub background: Hsla,
+    pub foreground: Hsla,
+    pub hover: Hsla,
+    pub active: Hsla,
+    pub ink: Hsla,
+}
+impl ButtonColors {
+    fn new(background: u32, hover: u32, active: u32, foreground: u32, ink: u32) -> Self {
+        let c = |value| Hsla::from(rgb(value));
+        Self {
+            background: c(background),
+            foreground: c(foreground),
+            hover: c(hover),
+            active: c(active),
+            ink: c(ink),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ButtonPalette {
+    pub default: ButtonColors,
+    pub primary: ButtonColors,
+    pub success: ButtonColors,
+    pub warning: ButtonColors,
+    pub danger: ButtonColors,
+}
+impl ButtonPalette {
+    fn new(theme: Theme) -> Self {
+        let c = ButtonColors::new;
+        match theme {
+            Theme::Day => Self {
+                default: c(0xe9eef3, 0xdce3eb, 0xccd6e2, 0x24344a, 0x24344a),
+                primary: c(0x23678c, 0x1e5878, 0x194963, 0xffffff, 0x23678c),
+                success: c(0x23754c, 0x1c6540, 0x175535, 0xffffff, 0x23754c),
+                warning: c(0xf0b44d, 0xe6a432, 0xda9422, 0x382509, 0x8a530b),
+                danger: c(0xb33838, 0x9d3030, 0x872929, 0xffffff, 0xb33838),
+            },
+            Theme::Night => Self {
+                default: c(0x263448, 0x304055, 0x3b4d64, 0xdde6f0, 0xdde6f0),
+                primary: c(0x82c5ea, 0x9bd1ef, 0xb3ddf4, 0x111925, 0x82c5ea),
+                success: c(0x73c69b, 0x8cd2ae, 0xa5dec1, 0x111925, 0x73c69b),
+                warning: c(0xf0b44d, 0xf4c16b, 0xf7cf8b, 0x382509, 0xf0b44d),
+                danger: c(0xef9696, 0xf3aeae, 0xf7c6c6, 0x111925, 0xef9696),
+            },
+        }
+    }
+
+    pub fn get(self, tone: ButtonTone) -> ButtonColors {
+        match tone {
+            ButtonTone::Default => self.default,
+            ButtonTone::Primary => self.primary,
+            ButtonTone::Success => self.success,
+            ButtonTone::Warning => self.warning,
+            ButtonTone::Danger => self.danger,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Palette {
     pub background: Hsla,
@@ -28,6 +101,7 @@ pub struct Palette {
     pub tab_hover: Hsla,
     pub tab_close_hover: Hsla,
     pub error: Hsla,
+    pub(super) buttons: ButtonPalette,
 }
 impl Palette {
     /// Low utilization approaches green below 25%; high utilization approaches red above 85%.
@@ -52,40 +126,42 @@ impl Palette {
         let c = |v| Hsla::from(rgb(v));
         match theme {
             Theme::Day => Self {
-                background: c(0xf6f7f9),
+                background: c(0xedf1f5),
                 surface: c(0xffffff),
-                terminal: c(0xf6f7f9),
-                text: c(0x242c3a),
-                muted: c(0x626f80),
-                accent: c(0x3b5fc0),
+                terminal: c(0xf8fafc),
+                text: c(0x24344a),
+                muted: c(0x607084),
+                accent: c(0x23678c),
                 network_sent: c(0x277467),
                 meter_green: c(0x32a875),
                 meter_blue: c(0x4b82e3),
                 meter_red: c(0xe46161),
-                border: c(0xe1e5eb),
-                selected: c(0xedf1fc),
-                tab_selected: c(0xf0f3f8),
-                tab_hover: c(0xf5f6f8),
-                tab_close_hover: c(0xdfe5ed),
+                border: c(0xdce3eb),
+                selected: c(0xe8f2f8),
+                tab_selected: c(0xe9eef3),
+                tab_hover: c(0xf6f8fa),
+                tab_close_hover: c(0xdce3eb),
                 error: c(0xb33838),
+                buttons: ButtonPalette::new(theme),
             },
             Theme::Night => Self {
-                background: c(0x191f29),
-                surface: c(0x1d232d),
-                terminal: c(0x191f29),
-                text: c(0xdce3ed),
-                muted: c(0xa2aec0),
-                accent: c(0xa2baff),
+                background: c(0x111925),
+                surface: c(0x1b2635),
+                terminal: c(0x121d2b),
+                text: c(0xdde6f0),
+                muted: c(0x9bacc1),
+                accent: c(0x82c5ea),
                 network_sent: c(0x8bd2bb),
                 meter_green: c(0x60c894),
                 meter_blue: c(0x7ca5ef),
                 meter_red: c(0xf08484),
-                border: c(0x333c4b),
-                selected: c(0x293955),
-                tab_selected: c(0x2a3340),
-                tab_hover: c(0x252d38),
-                tab_close_hover: c(0x3b4656),
+                border: c(0x304055),
+                selected: c(0x263e52),
+                tab_selected: c(0x263448),
+                tab_hover: c(0x172130),
+                tab_close_hover: c(0x304055),
                 error: c(0xffa39a),
+                buttons: ButtonPalette::new(theme),
             },
         }
     }
@@ -133,7 +209,7 @@ mod tests {
 pub fn apply(preferences: &Preferences, window: &mut Window, cx: &mut App) {
     super::shell::menus(preferences.language, cx);
     gpui_component::Theme::change(
-        if preferences.theme == Theme::Day {
+        if preferences.effective_theme() == Theme::Day {
             gpui_component::ThemeMode::Light
         } else {
             gpui_component::ThemeMode::Dark
@@ -141,7 +217,7 @@ pub fn apply(preferences: &Preferences, window: &mut Window, cx: &mut App) {
         Some(window),
         cx,
     );
-    let p = Palette::new(preferences.theme);
+    let p = Palette::new(preferences.effective_theme());
     let theme = gpui_component::Theme::global_mut(cx);
     theme.font_family = preferences.ui_font.clone().into();
     theme.font_size = px(preferences.ui_size);
@@ -155,18 +231,29 @@ pub fn apply(preferences: &Preferences, window: &mut Window, cx: &mut App) {
     theme.colors.foreground = p.text;
     theme.colors.border = p.border;
     theme.colors.input = p.border;
-    theme.colors.primary = p.accent;
-    theme.colors.primary_foreground = p.surface;
-    theme.colors.primary_hover = p.accent.opacity(0.92);
-    theme.colors.primary_active = p.accent;
-    theme.colors.secondary_hover = p.selected;
-    theme.colors.secondary_active = p.selected;
-    theme.colors.danger = rgb(0xa92f3b).into();
-    theme.colors.danger_foreground = gpui::white();
-    theme.colors.danger_hover = rgb(0x962532).into();
-    theme.colors.danger_active = rgb(0x86202b).into();
-    theme.colors.secondary = p.background;
-    theme.colors.secondary_foreground = p.text;
+    let buttons = p.buttons;
+    theme.colors.primary = buttons.primary.background;
+    theme.colors.primary_foreground = buttons.primary.foreground;
+    theme.colors.primary_hover = buttons.primary.hover;
+    theme.colors.primary_active = buttons.primary.active;
+    theme.colors.success = buttons.success.background;
+    theme.colors.success_foreground = buttons.success.foreground;
+    theme.colors.success_hover = buttons.success.hover;
+    theme.colors.success_active = buttons.success.active;
+    theme.colors.warning = buttons.warning.background;
+    theme.colors.warning_foreground = buttons.warning.foreground;
+    theme.colors.warning_hover = buttons.warning.hover;
+    theme.colors.warning_active = buttons.warning.active;
+    theme.colors.danger = buttons.danger.background;
+    theme.colors.danger_foreground = buttons.danger.foreground;
+    theme.colors.danger_hover = buttons.danger.hover;
+    theme.colors.danger_active = buttons.danger.active;
+    theme.colors.secondary = buttons.default.background;
+    theme.colors.secondary_foreground = buttons.default.foreground;
+    theme.colors.secondary_hover = buttons.default.hover;
+    theme.colors.secondary_active = buttons.default.active;
+    theme.colors.switch = p.muted;
+    theme.colors.switch_thumb = buttons.primary.foreground;
     theme.colors.muted = p.background;
     theme.colors.muted_foreground = p.muted;
     theme.colors.accent = p.selected;
@@ -181,4 +268,11 @@ pub fn apply(preferences: &Preferences, window: &mut Window, cx: &mut App) {
     } else {
         "en"
     });
+}
+
+pub(super) fn system_theme(window: &Window) -> Theme {
+    match window.appearance() {
+        gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark => Theme::Night,
+        _ => Theme::Day,
+    }
 }

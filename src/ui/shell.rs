@@ -300,6 +300,7 @@ fn connection_library_row(
                         .svg_icon("icons/link-2.svg")
                         .ghost()
                         .chromeless()
+                        .success()
                         .w(px(20.))
                         .h(px(20.))
                         // Library connects always open a fresh tab; duplicate
@@ -431,7 +432,7 @@ impl Workbench {
     }
     /// Reveal a selected tab after navigation or a layout change, never on output-only renders.
     fn render_tabs(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let palette = theme::Palette::new(self.prefs.theme);
+        let palette = theme::Palette::new(self.prefs.effective_theme());
         let active = self.tabs.get(self.active).map(|tab| (tab.id, self.active));
         let label = self
             .active_pane()
@@ -586,6 +587,7 @@ impl Workbench {
                                     return;
                                 }
                                 if let Some(index) = this.tabs.iter().position(|t| t.id == id) {
+                                    this.invalidate_commit_navigation();
                                     this.active = index;
                                 }
                                 this.focus_active(w, cx);
@@ -686,7 +688,7 @@ impl Workbench {
         _window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         // Scrolling re-renders every frame; rebuild the filtered snapshot only
         // when the query or the saved profiles actually changed.
         let rows = {
@@ -701,6 +703,7 @@ impl Workbench {
             cache.rows.clone()
         };
         let drag_entity = cx.entity();
+        let add_measure = cx.entity();
         div()
             .flex()
             .flex_col()
@@ -748,7 +751,7 @@ impl Workbench {
                 .absolute()
                 .size_0(),
             )
-            // Toolbar: search only; adding a connection lives at the footer's far right.
+            // Search and creation actions share the fixed top toolbar.
             .child(
                 div()
                     .flex()
@@ -780,6 +783,55 @@ impl Workbench {
                                 },
                             ))
                             .child(self.input_box(&self.connection_search)),
+                    )
+                    .child(
+                        self.button("library-sort", "")
+                            .icon(IconName::ArrowDown)
+                            .disabled(self.modal_commit.busy())
+                            .tooltip(self.t("sort_name"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.submit_metadata(
+                                    crate::services::metadata::Mutation::SortProfiles,
+                                    commits::AfterCommit::Stay,
+                                    cx,
+                                );
+                            })),
+                    )
+                    .child(
+                        self.button("library-import", self.t("import"))
+                            .svg_icon("icons/download.svg")
+                            .ghost()
+                            .primary()
+                            .on_click(cx.listener(|this, _, w, cx| this.import_file(w, cx))),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .child(
+                                self.button("library-new", self.t("add"))
+                                    .icon(IconName::Plus)
+                                    .primary()
+                                    .on_click(cx.listener(|this, _, w, cx| {
+                                        this.profile_form(None, None, w, cx)
+                                    })),
+                            )
+                            .when(cfg!(debug_assertions) && self.qa.is_some(), move |button| {
+                                let measure = add_measure.clone();
+                                button.child(
+                                    canvas(
+                                        move |bounds, _, cx| {
+                                            measure.update(cx, |this, _| {
+                                                if let Some(qa) = &mut this.qa {
+                                                    qa.connection_add_bounds = Some(bounds);
+                                                }
+                                            });
+                                        },
+                                        |_, _, _, _| {},
+                                    )
+                                    .absolute()
+                                    .size_full(),
+                                )
+                            }),
                     ),
             )
             // Result list with a persistent scrollbar overlay at its own right edge.
@@ -908,7 +960,7 @@ impl Workbench {
         drag: Resize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let viewport = f32::from(handle.bounds().size.height);
         let max = f32::from(handle.max_offset().height);
         // Sub-pixel/padding phantoms (a stray 1–2px range) hide below this
@@ -1047,7 +1099,7 @@ impl Workbench {
         drag: Resize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let viewport = f32::from(handle.bounds().size.width);
         let max = f32::from(handle.max_offset().width);
         // Sub-pixel/padding phantoms (a stray 1–2px range) hide below this
@@ -1130,7 +1182,6 @@ impl Workbench {
     /// Keep library-wide actions in the fixed dialog footer, outside the result scrollbar.
     pub(super) fn connection_library_footer(&self, cx: &mut Context<Self>) -> Div {
         let multi_count = self.connection_multi.len();
-        let add_measure = cx.entity();
         div()
             .flex()
             .flex_wrap()
@@ -1177,48 +1228,15 @@ impl Workbench {
             // footer keeps only library-wide actions.
             .child(div().flex_1())
             .child(
-                self.button("library-import", self.t("import"))
-                    .svg_icon("icons/download.svg")
-                    .ghost()
-                    .on_click(cx.listener(|this, _, w, cx| this.import_file(w, cx))),
-            )
-            .child(
                 self.button("library-export", self.t("export"))
                     .svg_icon("icons/upload.svg")
                     .ghost()
+                    .primary()
                     .on_click(cx.listener(|this, _, w, cx| this.export_file(w, cx))),
-            )
-            .child(
-                div()
-                    .relative()
-                    .child(
-                        self.button("library-new", self.t("add"))
-                            .icon(IconName::Plus)
-                            .on_click(
-                                cx.listener(|this, _, w, cx| this.profile_form(None, None, w, cx)),
-                            ),
-                    )
-                    .when(cfg!(debug_assertions) && self.qa.is_some(), move |button| {
-                        let measure = add_measure.clone();
-                        button.child(
-                            canvas(
-                                move |bounds, _, cx| {
-                                    measure.update(cx, |this, _| {
-                                        if let Some(qa) = &mut this.qa {
-                                            qa.connection_add_bounds = Some(bounds);
-                                        }
-                                    });
-                                },
-                                |_, _, _, _| {},
-                            )
-                            .absolute()
-                            .size_full(),
-                        )
-                    }),
             )
     }
     fn render_terminal_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let mut header = div()
             .flex()
             .items_center()
@@ -1238,15 +1256,14 @@ impl Workbench {
             } else {
                 "localhost".into()
             };
-            // The session state control replaces the old status dot at the far
-            // left. One link-2 glyph for all three states, colored by state:
-            // green connected, blue connecting, red disconnected/failed.
+            // This lightning control reflects connection state; the tooltip names its action:
+            // success when connected, primary while connecting, danger when disconnected.
             let state_control = (!local).then(|| match pane.state {
                 ConnectionState::Connected => self
                     .button(("disconnect-session", owner.session.as_u128() as u64), "")
-                    .svg_icon("icons/link-2.svg")
+                    .svg_icon("icons/zap.svg")
                     .ghost()
-                    .icon_color(p.meter_green)
+                    .success()
                     .tooltip(self.t("disconnect"))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.backend.close(owner);
@@ -1271,9 +1288,9 @@ impl Workbench {
                 | ConnectionState::HostVerification
                 | ConnectionState::CredentialsRequired => self
                     .button(("session-cancel", owner.session.as_u128() as u64), "")
-                    .svg_icon("icons/link-2.svg")
+                    .svg_icon("icons/zap.svg")
                     .ghost()
-                    .icon_color(p.accent)
+                    .primary()
                     .tooltip(self.t("cancel"))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.backend.close(owner);
@@ -1286,9 +1303,9 @@ impl Workbench {
                     .into_any_element(),
                 _ => self
                     .button(("session-reconnect", owner.session.as_u128() as u64), "")
-                    .svg_icon("icons/link-2.svg")
+                    .svg_icon("icons/zap.svg")
                     .ghost()
-                    .icon_color(p.error)
+                    .danger()
                     .tooltip(self.t("reconnect"))
                     .on_click(cx.listener(move |this, _, w, cx| {
                         this.reconnect(owner, String::new(), false, w, cx)
@@ -1331,7 +1348,7 @@ impl Workbench {
                             .ghost()
                             .tooltip(self.t("history"))
                             .on_click(cx.listener(|this, _, w, cx| {
-                                this.show_modal(Modal::LocalHistory, w, cx);
+                                this.open_history(w, cx);
                             })),
                     )
                     .child(
@@ -1364,7 +1381,7 @@ impl Workbench {
         header.into_any_element()
     }
     fn render_pane(&self, pane: &Pane, active: bool, cx: &mut Context<Self>) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let owner = pane.owner;
         let multiple = self
             .tabs
@@ -1524,7 +1541,7 @@ impl Workbench {
             .active_document
             .and_then(|id| pane.documents.iter().find(|d| d.id == id))
         else {
-            let p = theme::Palette::new(self.prefs.theme);
+            let p = theme::Palette::new(self.prefs.effective_theme());
             return div()
                 .p_3()
                 .text_color(p.muted)
@@ -1549,10 +1566,10 @@ impl Workbench {
     }
     /// Editor dialog footer: the unsaved marker and any save error or
     /// disconnect notice on the left (the full path lives in the header),
-    /// then encoding and the primary save right-aligned. Closing stays on
+    /// then encoding and the save action right-aligned. Closing stays on
     /// the header's dedicated button, so the footer carries no close action.
     pub(super) fn editor_footer(&self, owner: Owner, cx: &mut Context<Self>) -> Div {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let mut footer = div()
             .flex()
             .flex_wrap()
@@ -1602,16 +1619,11 @@ impl Workbench {
             })
             .when(!has_status, |row| row.child(div().flex_1()))
             .child(
-                self.button(("doc-encoding", id.as_u128() as u64), doc.encoding.label())
-                    .on_click(cx.listener(move |this, _, w, cx| {
-                        this.show_modal(
-                            Modal::Encoding {
-                                owner: Some(doc_owner),
-                                document: Some(id),
-                            },
-                            w,
-                            cx,
-                        )
+                self.button("discard-draft", self.t("discard_draft"))
+                    .danger()
+                    .disabled(doc.saving || !doc.dirty)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.request_close(CloseTarget::Document(owner, id), window, cx)
                     })),
             )
             .child(
@@ -1619,7 +1631,8 @@ impl Workbench {
                     ("save-document", id.as_u128() as u64),
                     self.t(if doc.saving { "saving" } else { "save" }),
                 )
-                .primary()
+                .success()
+                .tooltip(self.t("save_overwrites"))
                 .disabled(
                     doc.saving
                         || doc.owner != pane.owner
@@ -1728,12 +1741,12 @@ impl Workbench {
                         div()
                             .h(px(1.))
                             .w_full()
-                            .bg(theme::Palette::new(self.prefs.theme).border)
+                            .bg(theme::Palette::new(self.prefs.effective_theme()).border)
                     } else {
                         div()
                             .w(px(1.))
                             .h_full()
-                            .bg(theme::Palette::new(self.prefs.theme).border)
+                            .bg(theme::Palette::new(self.prefs.effective_theme()).border)
                     })
                     .when_some(focus.clone(), |d, f| d.track_focus(&f))
                     .on_mouse_down(
@@ -1786,7 +1799,7 @@ impl Workbench {
     }
     /// Bottom files panel for SSH panes; wraps render_files with a close affordance.
     fn render_files_panel(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let tree_owner = self.active_owner();
         let tree_scroll = self
             .active_pane()
@@ -2040,7 +2053,7 @@ impl Render for Workbench {
         #[cfg(target_os = "macos")]
         self.tab_strip.control_bounds.borrow_mut().clear();
         window.set_rem_size(px(self.prefs.ui_size / 0.875));
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let measure = cx.entity();
         let remote = self
             .active_pane()
@@ -2288,6 +2301,7 @@ impl Render for Workbench {
                                         self.button(key, "")
                                             .icon(icon)
                                             .ghost()
+                                            .primary()
                                             .h(px(self.controls_height()))
                                             .disabled(count >= MAX_LOCAL_PANES)
                                             .tooltip(self.t(match axis {
@@ -2309,6 +2323,7 @@ impl Render for Workbench {
                             self.button("new-local", "")
                                 .icon(IconName::Plus)
                                 .ghost()
+                                .primary()
                                 .h(px(self.controls_height()))
                                 .tooltip(self.t("new_local"))
                                 .on_click(cx.listener(|this, _, w, cx| this.new_local(w, cx))),
@@ -2330,24 +2345,26 @@ impl Render for Workbench {
                         self.header_control(
                             "theme-toggle",
                             self.button("theme-toggle", "")
-                                .svg_icon(if self.prefs.theme == Theme::Night {
+                                .svg_icon(if self.prefs.effective_theme() == Theme::Night {
                                     "icons/sun.svg"
                                 } else {
                                     "icons/moon.svg"
                                 })
                                 .ghost()
                                 .h(px(self.controls_height()))
-                                .tooltip(self.t(if self.prefs.theme == Theme::Night {
+                                .tooltip(self.t(if self.prefs.effective_theme() == Theme::Night {
                                     "day"
                                 } else {
                                     "night"
                                 }))
                                 .on_click(cx.listener(|this, _, w, cx| {
-                                    this.prefs.theme = if this.prefs.theme == Theme::Night {
-                                        Theme::Day
-                                    } else {
-                                        Theme::Night
-                                    };
+                                    this.prefs.theme =
+                                        if this.prefs.effective_theme() == Theme::Night {
+                                            Theme::Day
+                                        } else {
+                                            Theme::Night
+                                        };
+                                    this.prefs.follow_system_theme = false;
                                     this.apply_preferences(w, cx);
                                 })),
                             cx,
@@ -2500,17 +2517,11 @@ impl Render for Workbench {
                     this.connection_anchor = None;
                     this.connection_selected = None;
                     cx.notify();
-                } else if matches!(this.modal, Some(Modal::LocalHistory))
-                    && this.active_pane().is_some_and(|pane| {
-                        !this.history_views[pane.spec.history_scope().index()]
-                            .selected
-                            .is_empty()
-                    })
+                } else if let Some(target) = this.history_target()
+                    && !this.history_views[target.scope.index()].selected.is_empty()
                 {
-                    if let Some(scope) = this.active_pane().map(|pane| pane.spec.history_scope()) {
-                        this.history_views[scope.index()].clear_selection();
-                        cx.notify();
-                    }
+                    this.history_views[target.scope.index()].clear_selection();
+                    cx.notify();
                 } else if matches!(this.modal, Some(Modal::Transfers { .. }))
                     && !this.transfer_selected.is_empty()
                 {
@@ -2556,7 +2567,7 @@ impl Render for Workbench {
                         .active_pane()
                         .is_some_and(|p| !matches!(p.spec, SessionSpec::Local { .. }))
                 {
-                    this.show_modal(Modal::LocalHistory, w, cx);
+                    this.open_history(w, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &ToggleSystem, _, cx| {
@@ -2596,6 +2607,7 @@ impl Render for Workbench {
             }))
             .on_action(cx.listener(|this, _: &NextPane, w, cx| {
                 if this.modal.is_none() {
+                    this.invalidate_commit_navigation();
                     if let Some(tab) = this.tabs.get_mut(this.active) {
                         tab.active = (tab.active + 1) % tab.panes.len();
                     }
@@ -2847,7 +2859,7 @@ pub(super) fn menus(language: Language, cx: &mut App) {
         Menu {
             name: "MantaSH".into(),
             items: vec![
-                MenuItem::action(t("about_mantash"), ShowAboutModal),
+                MenuItem::action(t("about_mantash"), OpenAbout),
                 MenuItem::separator(),
                 MenuItem::action(t("settings"), OpenSettings),
                 MenuItem::separator(),

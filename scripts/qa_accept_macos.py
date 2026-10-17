@@ -69,6 +69,17 @@ class Acceptance:
         """Write test evidence only to the isolated directory until it is reviewed."""
         self.report.write_text(json.dumps(self.results, ensure_ascii=False, indent=2))
 
+    def authenticate_fixture(self):
+        """Supply only the owned loopback password after the production host check."""
+        state = self.wait(lambda s: s["modal"] == "credentials" or self.pane(s)["state"] == "Connected",
+                          "Verified loopback reaches authentication")
+        if state["modal"] == "credentials":
+            secret = self.root / "fixture-password.txt"
+            with os.fdopen(os.open(secret, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as output:
+                output.write((self.fixture / "password.txt").read_bytes())
+            self.action("fixture_credentials", file=str(secret))
+            self.action("submit_credentials")
+
     def settled_terminal(self):
         """Wait for a verified prompt and quiet output before comparing IME-only state.
 
@@ -137,6 +148,7 @@ class Acceptance:
         self.action("submit_profile", connect=True)
         self.wait(lambda s: s["modal"] == "trust", "新 SSH 主机等待指纹确认")
         self.action("trust")
+        self.authenticate_fixture()
         self.wait(lambda s: pane(s)["state"] == "Connected", "确认后建立真实回环 SSH")
         self.action("split", vertical=False)
         self.check(len(self.state()["tabs"][1]["panes"]) == 1, "SSH 拒绝分屏")

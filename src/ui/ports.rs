@@ -148,7 +148,7 @@ impl Workbench {
         expanded: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let port = row.source;
         let key = row.key.clone();
         let number = row.number;
@@ -412,7 +412,7 @@ impl Workbench {
 
     /// Fixed toolbar and column labels; only the rows beneath them scroll.
     pub(super) fn render_ports(&self, owner: Owner, cx: &mut Context<Self>) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let Some(pane) = self.pane(owner) else {
             return div().into_any_element();
         };
@@ -475,9 +475,7 @@ impl Workbench {
                     .flex_col()
                     .gap(px(theme::SPACE_CONTROL))
                     .child(self.measure_port_region("toolbar", cx))
-                    .px(px(theme::SPACE_PANEL))
-                    .pt(px(theme::SPACE_PANEL))
-                    .pb(px(theme::SPACE_CONTROL))
+                    .p(px(theme::SPACE_CONTROL))
                     .child(
                         div()
                             .w_full()
@@ -506,7 +504,7 @@ impl Workbench {
                                     .relative()
                                     .flex()
                                     .items_center()
-                                    .gap(px(theme::SPACE_SMALL))
+                                    .gap(px(theme::SPACE_CONTROL))
                                     .child(self.measure_port_region("filters", cx))
                                     .children(filters.into_iter().enumerate().map(
                                         |(index, (filter, text))| {

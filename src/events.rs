@@ -15,7 +15,7 @@ pub enum Event {
     Program(Owner, Option<String>),
     EncodingWarning(Owner),
     Directory(Owner, String),
-    History(HistoryEntry),
+    Metadata(crate::services::metadata::Receipt),
     HostKey {
         owner: Owner,
         host: String,
@@ -79,5 +79,4 @@ pub enum Event {
         result: Result<crate::processes::Outcome, String>,
     },
     Error(String),
-    ProfilesSaved(Result<(), String>),
 }

@@ -193,11 +193,18 @@ pub enum Tool {
     Editor,
 }
 
-/// Preferences use serde defaults so a missing newly introduced property is harmless.
+/// Preferences tolerate missing and retired properties when loading saved settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
     pub theme: Theme,
+    pub follow_system_theme: bool,
+    /// Platform appearance is runtime-only; the saved manual theme remains intact.
+    #[serde(skip)]
+    pub system_theme: Option<Theme>,
+    pub mouse_reporting: bool,
+    pub open_files_on_connect: bool,
+    pub remember_credentials: bool,
     pub language: Language,
     pub ui_font: String,
     pub ui_size: f32,
@@ -219,6 +226,11 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             theme: Theme::Day,
+            follow_system_theme: false,
+            system_theme: None,
+            mouse_reporting: true,
+            open_files_on_connect: true,
+            remember_credentials: true,
             language: Language::Zh,
             ui_font: crate::platform::ui_font().into(),
             ui_size: 14.,
@@ -238,6 +250,32 @@ impl Default for Preferences {
     }
 }
 impl Preferences {
+    /// Resolve runtime platform appearance without changing the persisted manual choice.
+    pub fn effective_theme(&self) -> Theme {
+        if self.follow_system_theme {
+            self.system_theme.unwrap_or(self.theme)
+        } else {
+            self.theme
+        }
+    }
+
+    /// Reset visible settings while retaining window geometry and business data preferences.
+    pub fn restore_visible_defaults(&mut self) {
+        let defaults = Self::default();
+        self.theme = defaults.theme;
+        self.language = defaults.language;
+        self.ui_font = defaults.ui_font;
+        self.ui_size = defaults.ui_size;
+        self.terminal_font = defaults.terminal_font;
+        self.terminal_size = defaults.terminal_size;
+        self.local_shell = defaults.local_shell;
+        self.local_encoding = defaults.local_encoding;
+        self.follow_system_theme = defaults.follow_system_theme;
+        self.mouse_reporting = defaults.mouse_reporting;
+        self.open_files_on_connect = defaults.open_files_on_connect;
+        self.remember_credentials = defaults.remember_credentials;
+    }
+
     /// Reject unusable persisted sizes without touching unrelated settings.
     pub fn normalize(&mut self) {
         fn bounded(value: f32, fallback: f32, low: f32, high: f32) -> f32 {
@@ -401,15 +439,10 @@ impl Workspace {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HistoryEntry {
-    pub id: Id,
-    pub scope: String,
-    pub command: String,
-    pub timestamp: i64,
-}
+mod history;
+pub use history::{HISTORY_LIMIT, HistoryCatalog, HistoryItem};
 
-/// Logical history lists share browsing state without rewriting stored command origins.
+/// Logical list membership; legacy origin strings are accepted only during migration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryScope {

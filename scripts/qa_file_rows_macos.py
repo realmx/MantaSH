@@ -63,6 +63,7 @@ class FileRowsAcceptance(Acceptance):
         self.action("submit_profile", connect=True)
         self.wait(lambda s: s["modal"] == "trust", "Dedicated SSH host awaits verification")
         self.action("trust")
+        self.authenticate_fixture()
         self.wait(lambda s: self.pane(s)["state"] == "Connected", "Loopback SSH connected")
         self.action("tool", tool="files")
         self.directory(remote)

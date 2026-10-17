@@ -1,6 +1,15 @@
-//! Shared SSH history with explicit actions on the active terminal and fixed deletion targets.
+//! Shared history browsing with actions bound to one modal instance and terminal attempt.
 use super::*;
 use gpui_component::IconName;
+
+/// Browsing scope and execution owner are frozen when this modal instance opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(debug_assertions, derive(serde::Deserialize, serde::Serialize))]
+pub struct HistoryTarget {
+    pub(super) instance: Id,
+    pub(super) owner: Owner,
+    pub(super) scope: HistoryScope,
+}
 
 /// Browsing and selection state belongs to a history scope, shared by SSH tabs.
 pub(super) struct HistoryView {
@@ -32,16 +41,34 @@ impl HistoryView {
 /// Frozen history deletion context used to keep stale button events inert.
 #[derive(Clone)]
 pub(super) struct HistoryDeleteSnapshot {
-    pub(super) owner: Owner,
-    pub(super) scope: HistoryScope,
+    pub(super) target: HistoryTarget,
     pub(super) query: String,
     pub(super) visible_ids: Vec<Id>,
     pub(super) target_ids: Vec<Id>,
 }
 
 impl Workbench {
-    /// Resolve persisted origins into one shared SSH list, preserving newest-first ordering.
-    pub(super) fn visible_history(&self, scope: HistoryScope, cx: &App) -> Vec<&HistoryEntry> {
+    pub(super) fn history_target(&self) -> Option<HistoryTarget> {
+        match self.modal {
+            Some(Modal::LocalHistory(target)) => Some(target),
+            _ => None,
+        }
+    }
+
+    pub(super) fn open_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pane) = self.active_pane() else {
+            return;
+        };
+        let target = HistoryTarget {
+            instance: Id::new_v4(),
+            owner: pane.owner,
+            scope: pane.spec.history_scope(),
+        };
+        self.show_modal(Modal::LocalHistory(target), window, cx);
+    }
+
+    /// The catalogue owns MRU order; scope is container membership, not command metadata.
+    pub(super) fn visible_history(&self, scope: HistoryScope, cx: &App) -> Vec<&HistoryItem> {
         let query = self.history_views[scope.index()]
             .search
             .read(cx)
@@ -49,19 +76,17 @@ impl Workbench {
             .trim()
             .to_lowercase();
         self.history
-            .iter()
-            .filter(|entry| {
-                scope.includes(&entry.scope) && entry.command.to_lowercase().contains(&query)
-            })
+            .list(scope)
+            .filter(|entry| entry.command.to_lowercase().contains(&query))
             .collect()
     }
     /// Snapshot the visible rows and selection before opening a fixed-target confirmation.
     pub(super) fn history_delete_snapshot(
         &self,
-        owner: Owner,
-        scope: HistoryScope,
+        target: HistoryTarget,
         cx: &App,
     ) -> HistoryDeleteSnapshot {
+        let scope = target.scope;
         let query = self.history_views[scope.index()]
             .search
             .read(cx)
@@ -75,72 +100,81 @@ impl Workbench {
         let selected = self.history_views[scope.index()].selected.clone();
         let target_ids = history_delete_targets(&visible_ids, &selected);
         HistoryDeleteSnapshot {
-            owner,
-            scope,
+            target,
             query,
             visible_ids,
             target_ids,
         }
     }
-    /// Reuse only the original live shell prompt, never authentication prompts or foreground TUIs.
-    pub(super) fn can_insert_history(&self, owner: Owner, cx: &App) -> bool {
-        self.pane(owner)
-            .filter(|pane| pane.state == ConnectionState::Connected)
-            .and_then(|pane| pane.terminal.as_ref())
-            .is_some_and(|terminal| {
-                let view = terminal.read(cx);
-                view.connected
-                    && view
-                        .session
-                        .terminal
-                        .try_lock()
-                        .is_some_and(|buffer| buffer.command_cursor.editing())
-            })
+    /// Reuse only this modal's active, uncancelled terminal attempt at a reliable shell prompt.
+    pub(super) fn can_insert_history(&self, target: HistoryTarget, cx: &App) -> bool {
+        self.history_target() == Some(target)
+            && self.active_owner() == Some(target.owner)
+            && self
+                .pane(target.owner)
+                .filter(|pane| {
+                    pane.state == ConnectionState::Connected
+                        && pane.spec.history_scope() == target.scope
+                })
+                .and_then(|pane| pane.terminal.as_ref())
+                .is_some_and(|terminal| {
+                    let view = terminal.read(cx);
+                    view.session.owner == target.owner
+                        && !view.session.cancel.is_cancelled()
+                        && view.connected
+                        && view
+                            .session
+                            .terminal
+                            .try_lock()
+                            .is_some_and(|buffer| buffer.command_cursor.editing())
+                })
     }
     /// Insert without executing, and return focus to the terminal captured by this action.
     pub(super) fn insert_history(
         &mut self,
-        owner: Owner,
+        target: HistoryTarget,
         command: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.can_insert_history(owner, cx) {
+        if !self.can_insert_history(target, cx) {
             self.notice = Some(self.t("history_prompt_required").into());
             cx.notify();
             return;
         }
-        if let Some(terminal) = self.pane(owner).and_then(|pane| pane.terminal.clone()) {
+        if let Some(terminal) = self
+            .pane(target.owner)
+            .and_then(|pane| pane.terminal.clone())
+        {
             terminal.update(cx, |terminal, cx| terminal.paste_text(command, cx));
             self.notice = None;
-            if matches!(self.modal, Some(Modal::LocalHistory)) {
-                self.dismiss(window, cx);
-            }
+            self.dismiss(window, cx);
             terminal.focus_handle(cx).focus(window);
         }
     }
     /// Paste a history command and submit it immediately from the current shell prompt.
     pub(super) fn execute_history(
         &mut self,
-        owner: Owner,
+        target: HistoryTarget,
         command: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.can_insert_history(owner, cx) {
+        if !self.can_insert_history(target, cx) {
             self.notice = Some(self.t("history_prompt_required").into());
             cx.notify();
             return;
         }
-        if let Some(terminal) = self.pane(owner).and_then(|pane| pane.terminal.clone()) {
+        if let Some(terminal) = self
+            .pane(target.owner)
+            .and_then(|pane| pane.terminal.clone())
+        {
             terminal.update(cx, |terminal, cx| {
                 terminal.paste_text(command, cx);
                 terminal.type_text("\r", cx);
             });
             self.notice = None;
-            if matches!(self.modal, Some(Modal::LocalHistory)) {
-                self.dismiss(window, cx);
-            }
+            self.dismiss(window, cx);
             terminal.focus_handle(cx).focus(window);
         }
     }
@@ -151,26 +185,21 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let current_owner = self
-            .active_pane()
-            .map(|pane| (pane.owner, pane.spec.history_scope()));
-        let current_query = self.history_views[snapshot.scope.index()]
+        let target = snapshot.target;
+        let current_query = self.history_views[target.scope.index()]
             .search
             .read(cx)
             .value()
             .to_string();
         let current_visible_ids = self
-            .visible_history(snapshot.scope, cx)
+            .visible_history(target.scope, cx)
             .into_iter()
             .map(|entry| entry.id)
             .collect::<Vec<_>>();
-        let current_selected = self.history_views[snapshot.scope.index()].selected.clone();
+        let current_selected = self.history_views[target.scope.index()].selected.clone();
         let current_targets = history_delete_targets(&current_visible_ids, &current_selected);
-        let valid = self
-            .modal
-            .as_ref()
-            .is_some_and(|modal| matches!(modal, Modal::LocalHistory))
-            && current_owner == Some((snapshot.owner, snapshot.scope))
+        let valid = self.history_target() == Some(target)
+            && self.active_owner() == Some(target.owner)
             && current_query == snapshot.query
             && current_visible_ids == snapshot.visible_ids
             && current_targets == snapshot.target_ids
@@ -182,9 +211,9 @@ impl Workbench {
         }
         self.show_modal(
             Modal::DeleteHistory {
-                owner: snapshot.owner,
-                scope: snapshot.scope,
-                label: self.t(snapshot.scope.label_key()).into(),
+                owner: target.owner,
+                scope: target.scope,
+                label: self.t(target.scope.label_key()).into(),
                 ids: snapshot.target_ids,
             },
             window,
@@ -192,17 +221,17 @@ impl Workbench {
         );
     }
     /// Keep the search toolbar stationary, with full command text and direct actions.
-    pub(super) fn render_history(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(pane) = self.active_pane() else {
-            return div().into_any_element();
-        };
-        let owner = pane.owner;
-        let scope = pane.spec.history_scope();
+    pub(super) fn render_history(
+        &self,
+        target: HistoryTarget,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let scope = target.scope;
         let view = &self.history_views[scope.index()];
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let notice_is_info = self.notice.as_deref() == Some(self.t("copied"));
         let rows = self.visible_history(scope, cx);
-        let can_insert = self.can_insert_history(owner, cx);
+        let can_insert = self.can_insert_history(target, cx);
         self.history_content_marker.set(None);
         let marker = self.history_content_marker.clone();
         div()
@@ -237,11 +266,8 @@ impl Workbench {
                                         .visible_history(scope, cx)
                                         .first()
                                         .map(|entry| entry.command.clone());
-                                    if this.active_pane().is_some_and(|pane| {
-                                        pane.owner == owner && pane.spec.history_scope() == scope
-                                    }) && let Some(command) = command
-                                    {
-                                        this.insert_history(owner, &command, window, cx);
+                                    if let Some(command) = command {
+                                        this.insert_history(target, &command, window, cx);
                                     }
                                 }
                             }))
@@ -291,6 +317,7 @@ impl Workbench {
                                 let id = entry.id;
                                 let copy = entry.command.clone();
                                 let run = entry.command.clone();
+                                let insert = entry.command.clone();
                                 let selected = view.selected.contains(&id);
                                 div()
                                     .id(("history-row", id.as_u128() as u64))
@@ -310,12 +337,7 @@ impl Workbench {
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                                            if !matches!(this.modal, Some(Modal::LocalHistory))
-                                                || !this.active_pane().is_some_and(|pane| {
-                                                    pane.owner == owner
-                                                        && pane.spec.history_scope() == scope
-                                                })
-                                            {
+                                            if this.history_target() != Some(target) {
                                                 return;
                                             }
                                             let visible = this
@@ -360,6 +382,9 @@ impl Workbench {
                                                 )
                                                 .on_click(cx.listener(move |this, _, _, cx| {
                                                     cx.stop_propagation();
+                                                    if this.history_target() != Some(target) {
+                                                        return;
+                                                    }
                                                     cx.write_to_clipboard(
                                                         ClipboardItem::new_string(copy.clone()),
                                                     );
@@ -368,19 +393,36 @@ impl Workbench {
                                                 })),
                                             )
                                             .child(
+                                                self.icon_button(
+                                                    ("insert-history", id.as_u128() as u64),
+                                                    "insert",
+                                                    IconName::ArrowDown,
+                                                )
+                                                .disabled(!can_insert)
+                                                .on_click(cx.listener(
+                                                    move |this, _, window, cx| {
+                                                        cx.stop_propagation();
+                                                        this.insert_history(
+                                                            target, &insert, window, cx,
+                                                        );
+                                                    },
+                                                )),
+                                            )
+                                            .child(
                                                 self.button(
                                                     ("run-history", id.as_u128() as u64),
                                                     "",
                                                 )
                                                 .svg_icon("mantash-play.svg")
                                                 .ghost()
+                                                .primary()
                                                 .tooltip(self.t("execute"))
                                                 .disabled(!can_insert)
                                                 .on_click(cx.listener(
                                                     move |this, _, window, cx| {
                                                         cx.stop_propagation();
                                                         this.execute_history(
-                                                            owner, &run, window, cx,
+                                                            target, &run, window, cx,
                                                         );
                                                     },
                                                 )),

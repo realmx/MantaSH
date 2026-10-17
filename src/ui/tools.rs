@@ -228,7 +228,16 @@ impl Workbench {
         };
         let paths = pane.files.selected_paths();
         if !paths.is_empty() {
-            self.show_modal(Modal::DeleteFiles { owner, paths }, window, cx);
+            let origin = FileSnapshot::capture(pane, paths.clone());
+            self.show_modal(
+                Modal::DeleteFiles {
+                    owner,
+                    paths,
+                    origin,
+                },
+                window,
+                cx,
+            );
         }
     }
     pub(super) fn navigate(&mut self, owner: Owner, path: Option<String>, cx: &mut Context<Self>) {
@@ -254,6 +263,23 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.file_path_busy(owner, &path) {
+            return;
+        }
+        if let Some(id) = self.pane(owner).and_then(|pane| {
+            pane.documents
+                .iter()
+                .find(|doc| {
+                    doc.original.path == path && (doc.dirty || doc.saving || doc.owner != owner)
+                })
+                .map(|doc| doc.id)
+        }) {
+            if let Some(pane) = self.pane_mut(owner) {
+                pane.active_document = Some(id);
+            }
+            self.show_modal(Modal::Editor { owner }, window, cx);
+            return;
+        }
         // Reopening an existing path always starts a fresh remote read. The
         // document entity is reused only after the newest response arrives,
         // so the editor cannot display stale input from an older open.
@@ -326,7 +352,8 @@ impl Workbench {
                             doc.reverting = false;
                         } else {
                             doc.revision += 1;
-                            doc.dirty = true;
+                            doc.dirty = doc.encoding != doc.original.encoding
+                                || doc.input.read(cx).value().as_ref() != doc.original.text;
                         }
                     }
                     cx.notify();
@@ -345,15 +372,21 @@ impl Workbench {
                 open_request: None,
                 reverting: false,
                 saving: false,
+                save_snapshot: None,
+                formatting: None,
                 error: None,
             });
             pane.active_document = Some(id);
         }
-        // The opened document presents itself as the editor dialog, even
-        // when its pane is not the active one behind the overlay.
-        self.show_modal(Modal::Editor { owner }, window, cx);
-        if let Some(doc) = self.document(owner, id) {
-            doc.input.focus_handle(cx).focus(window);
+        // A background read may populate its session, but cannot take over another view.
+        if self.active_owner() == Some(owner)
+            && (self.modal.is_none()
+                || matches!(self.modal, Some(Modal::Editor { owner: current }) if current == owner))
+        {
+            self.show_modal(Modal::Editor { owner }, window, cx);
+            if let Some(doc) = self.document(owner, id) {
+                doc.input.focus_handle(cx).focus(window);
+            }
         }
     }
     /// Replace an existing document with the newest successful remote read.
@@ -374,6 +407,10 @@ impl Workbench {
         if document.open_request != Some(request) {
             return false;
         }
+        if document.dirty || document.saving {
+            document.open_request = None;
+            return true;
+        }
         let input = document.input.clone();
         document.open_request = None;
         document.original = file.clone();
@@ -382,6 +419,8 @@ impl Workbench {
         document.dirty = false;
         document.reverting = true;
         document.saving = false;
+        document.save_snapshot = None;
+        document.formatting = None;
         document.error = None;
         if let Some(pane) = self.pane_mut(owner) {
             pane.active_document = Some(id);
@@ -410,6 +449,18 @@ impl Workbench {
         force: bool,
         cx: &mut Context<Self>,
     ) {
+        if !self
+            .pane(owner)
+            .is_some_and(|pane| pane.state == ConnectionState::Connected)
+        {
+            return;
+        }
+        if self
+            .document(owner, id)
+            .is_some_and(|doc| self.file_path_busy(owner, &doc.original.path))
+        {
+            return;
+        }
         let Some(doc) = self.document_mut(owner, id) else {
             return;
         };
@@ -422,6 +473,7 @@ impl Workbench {
         let text = doc.input.read(cx).value().to_string();
         let encoding = doc.encoding;
         let revision = doc.revision;
+        doc.save_snapshot = Some((revision, text.clone(), encoding));
         self.backend
             .save_file(owner, id, revision, original, text, encoding, force);
         cx.notify();
@@ -482,36 +534,37 @@ impl Workbench {
         let Some(pane) = self.pane(owner) else {
             return;
         };
-        let directory = pane.files.path.clone();
-        let original = if rename {
-            pane.files.selected.iter().next().cloned()
+        let paths = if rename {
+            pane.files.selected_paths()
         } else {
-            None
+            Vec::new()
         };
-        if rename && original.is_none() {
+        if rename && paths.len() != 1 {
             return;
         }
-        let value = original
-            .as_ref()
-            .and_then(|s| s.rsplit('/').next())
-            .unwrap_or("");
-        let input = Self::input(value, "", false, window, cx);
-        self.show_modal(
-            Modal::FileName {
-                owner,
-                directory,
-                original,
-                input,
-            },
-            window,
-            cx,
-        );
+        let original = paths.first().cloned();
+        let origin = FileSnapshot::capture(pane, paths);
+        if !origin.matches(pane) {
+            return;
+        }
+        self.file_name_target(origin, original, window, cx);
     }
     pub(super) fn choose_transfer(
         &mut self,
         owner: Owner,
         upload: bool,
         directories: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.choose_transfer_targets(owner, upload, directories, None, window, cx);
+    }
+    pub(super) fn choose_transfer_targets(
+        &mut self,
+        owner: Owner,
+        upload: bool,
+        directories: bool,
+        targets: Option<Vec<String>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -526,8 +579,12 @@ impl Workbench {
         };
         let profile = profile.clone();
         let directory = pane.files.path.clone();
-        let selected = pane.files.selected_paths();
-        let request = pane.files.request;
+        let row_target = targets.is_some();
+        let selected = targets.unwrap_or_else(|| pane.files.selected_paths());
+        let origin = FileSnapshot::capture(pane, selected.clone());
+        if !origin.matches(pane) {
+            return;
+        }
         if !upload && selected.is_empty() {
             return;
         }
@@ -541,11 +598,8 @@ impl Workbench {
             if let Ok(Ok(Some(paths))) = prompt.await {
                 let _ = this.update_in(cx, |this, window, cx| {
                     let still_current = this.active_pane().is_some_and(|pane| {
-                        pane.owner == owner
-                            && pane.state == ConnectionState::Connected
-                            && pane.files.path == directory
-                            && pane.files.request == request
-                            && (upload || pane.files.selected_paths() == selected)
+                        origin.matches(pane)
+                            && (upload || row_target || pane.files.selected_paths() == selected)
                     });
                     if !still_current {
                         this.notice = Some(this.t("transfer_target_changed").into());
@@ -791,10 +845,9 @@ impl Workbench {
         let tool = self.active_tool().unwrap_or(Tool::System);
         let body = match tool {
             Tool::Files => self.render_files(cx),
-            Tool::History => self.render_history(cx),
-            // The editor moved into a dialog; a legacy workspace restoring
-            // "editor" normalizes to the system page (see workspace restore).
-            Tool::System | Tool::Editor => self.render_monitor(window, cx),
+            // History and editor actions belong to modal instances. Legacy tool
+            // identifiers must not render an unowned command-submission surface.
+            Tool::System | Tool::Editor | Tool::History => self.render_monitor(window, cx),
         };
         div()
             .size_full()
@@ -809,7 +862,7 @@ impl Workbench {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let Some(pane) = self
             .active_pane()
             .filter(|p| matches!(p.spec, SessionSpec::Ssh { .. }))
@@ -940,6 +993,7 @@ impl Workbench {
                     .disabled(pane.state != ConnectionState::Connected)
                     .svg_icon("icons/folder-plus.svg")
                     .ghost()
+                    .primary()
                     .tooltip(self.t("mkdir"))
                     .on_click(
                         cx.listener(move |this, _, w, cx| this.file_name_form(owner, false, w, cx)),
@@ -949,6 +1003,7 @@ impl Workbench {
                 self.button("upload-file", "")
                     .svg_icon("icons/upload.svg")
                     .ghost()
+                    .primary()
                     .tooltip(self.t("upload"))
                     .disabled(pane.state != ConnectionState::Connected)
                     .on_click(cx.listener(move |this, _, w, cx| {
@@ -969,6 +1024,7 @@ impl Workbench {
                     self.button("delete-file", "")
                         .svg_icon("icons/trash-2.svg")
                         .ghost()
+                        .danger()
                         .tooltip(self.t("delete"))
                         .disabled(pane.files.loading || pane.state != ConnectionState::Connected)
                         .on_click(cx.listener(move |this, _, w, cx| {
@@ -980,7 +1036,7 @@ impl Workbench {
     }
 
     pub(super) fn render_files(&self, cx: &mut Context<Self>) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let Some(pane) = self
             .active_pane()
             .filter(|p| matches!(p.spec, SessionSpec::Ssh { .. }))
@@ -1029,70 +1085,41 @@ impl Workbench {
                     ),
             );
         }
-        // Adaptive columns: every column is at least as wide as its header label
-        // and its widest visible cell; a manual drag sets an exact override.
-        let name_header = estimate_text_width(self.t("name"), self.prefs.ui_size);
-        let size_header = estimate_text_width(self.t("size"), self.prefs.ui_size);
-        let date_header = estimate_text_width(self.t("modified"), self.prefs.ui_size);
-        let mut adaptive_size = size_header;
-        let mut date_w = date_header;
-        for entry in pane
-            .files
-            .entries
-            .iter()
-            .filter(|e| pane.files.show_hidden || !e.name.starts_with('.'))
-        {
-            let size_label = if entry.directory {
-                "—".to_string()
-            } else {
-                entry.size.map_or_else(|| "—".into(), crate::monitor::bytes)
-            };
-            adaptive_size = adaptive_size.max(estimate_text_width(&size_label, self.prefs.ui_size));
-            let date_label = entry
-                .modified
-                .and_then(|m| chrono::DateTime::from_timestamp(m as i64, 0))
-                .map(|d| {
-                    d.with_timezone(&chrono::Local)
-                        .format("%m-%d %H:%M")
-                        .to_string()
-                })
-                .unwrap_or_else(|| "—".into());
-            date_w = date_w.max(estimate_text_width(&date_label, self.prefs.ui_size));
-        }
-        // Every column keeps a 100px floor, whatever its content or drag
-        // override says.
-        let size_w = (adaptive_size + pane.files.size_extra).max(100.);
-        let date_w = date_w.max(100.);
-        // The name column has an EXPLICIT width shared verbatim by the header
-        // and every row (computed from the rows' own live viewport), so no
-        // flex distribution quirk can ever make the two disagree; size and
-        // date keep their content minimums and manual-drag overrides.
+        let ui = self.prefs.ui_size;
+        let name_header = estimate_text_width(self.t("name"), ui);
+        let size_w =
+            (72. * ui / 14. + pane.files.size_extra).max(estimate_text_width(self.t("size"), ui));
+        let action_size = (ui + 6.).clamp(20., 26.);
+        let action_w = action_size * 4. + theme::SPACE_SMALL * 3.;
         let panel = f32::from(pane.files.scroll.bounds().size.width);
-        let name_w = pane
-            .files
-            .name_extra
-            .map(|width| width.max(100.))
-            .or_else(|| Some(((panel - 50. - size_w - date_w).max(100.)).max(0.)));
-        // Single coordinate system: the header is the first row inside the
-        // same scroll container as the file rows, so both share one layout
-        // and one scroll translation.
+        let action_gap = if panel < 560. {
+            theme::SPACE_CONTROL
+        } else {
+            theme::SPACE_PANEL
+        };
+        let overhead = theme::SPACE_PANEL * 2. + 18. + action_gap;
+        let name_w = Some(
+            pane.files
+                .name_extra
+                .unwrap_or((panel - size_w - action_w - overhead).max(140.))
+                .max(name_header),
+        );
         let column_row = |prefix: &'static str,
                           name_cell: AnyElement,
                           second: SharedString,
-                          third: SharedString,
-                          trailing: bool|
+                          trailing: bool,
+                          actions: AnyElement|
          -> Div {
             div()
                 .flex()
                 .items_center()
-                .gap(px(4.))
                 .px(px(theme::SPACE_PANEL))
-                .min_w(px(name_w.unwrap_or(name_header) + size_w + date_w + 40.))
+                .min_w(px(name_w.unwrap() + size_w + action_w + overhead))
                 .child(name_cell)
                 .child(
                     div()
                         .id((SharedString::from(prefix), 1usize))
-                        .w(px(5.))
+                        .w(px(9.))
                         .h(px(22.))
                         .flex_shrink_0()
                         .when(trailing, |edge| {
@@ -1100,20 +1127,9 @@ impl Workbench {
                                 .hover(|d| d.bg(p.accent))
                                 .on_mouse_down(
                                     MouseButton::Left,
-                                    cx.listener(move |this, _, _window, _| {
-                                        // The baseline must come from the list's own
-                                        // viewport; the old right-panel tool width no
-                                        // longer matches the bottom file panel and made
-                                        // the first drag jump.
-                                        let panel = this
-                                            .pane(owner)
-                                            .map(|p| f32::from(p.files.scroll.bounds().size.width))
-                                            .unwrap_or(name_header + size_w + date_w + 50.);
-                                        let current = name_w.unwrap_or_else(|| {
-                                            (panel - 50. - size_w - date_w).max(name_header)
-                                        });
-                                        if let Some(p) = this.pane_mut(owner) {
-                                            p.files.name_extra = Some(current);
+                                    cx.listener(move |this, _, _, _| {
+                                        if let Some(pane) = this.pane_mut(owner) {
+                                            pane.files.name_extra = name_w;
                                         }
                                         this.resize = Some(Resize::FileName(owner));
                                     }),
@@ -1124,13 +1140,14 @@ impl Workbench {
                     div()
                         .w(px(size_w))
                         .flex_shrink_0()
+                        .text_right()
                         .text_color(p.muted)
                         .child(second),
                 )
                 .child(
                     div()
                         .id((SharedString::from(prefix), 2usize))
-                        .w(px(5.))
+                        .w(px(9.))
                         .h(px(22.))
                         .flex_shrink_0()
                         .when(trailing, |edge| {
@@ -1139,17 +1156,17 @@ impl Workbench {
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, _, _, _| {
-                                        this.resize = Some(Resize::FileSize(owner));
+                                        this.resize = Some(Resize::FileSize(owner))
                                     }),
                                 )
                         }),
                 )
                 .child(
                     div()
-                        .w(px(date_w))
+                        .ml(px(action_gap))
+                        .w(px(action_w))
                         .flex_shrink_0()
-                        .text_color(p.muted)
-                        .child(third),
+                        .child(actions),
                 )
         };
         let header = column_row(
@@ -1173,8 +1190,8 @@ impl Workbench {
                 )
                 .into_any_element(),
             self.t("size").into(),
-            self.t("modified").into(),
             true,
+            div().child(self.t("actions")).into_any_element(),
         )
         // Stateful like the row elements: rows carry .id(...) and measurably
         // lay their leading icon out differently from an id-less container.
@@ -1371,20 +1388,26 @@ impl Workbench {
                                                             )
                                                             .into()
                                                     };
-                                                    let date_label: SharedString = entry
-                                                        .modified
-                                                        .and_then(|m| {
-                                                            chrono::DateTime::from_timestamp(
-                                                                m as i64, 0,
-                                                            )
-                                                        })
-                                                        .map(|d| {
-                                                            d.with_timezone(&chrono::Local)
-                                                                .format("%m-%d %H:%M")
-                                                                .to_string()
-                                                        })
-                                                        .unwrap_or_else(|| "—".into())
-                                                        .into();
+                                                    let actions = div().flex().gap(px(theme::SPACE_SMALL)).children([
+                                                        ("rename", "icons/pencil.svg", FileAction::Rename),
+                                                        ("copy", "icons/copy.svg", FileAction::Copy),
+                                                        ("download", "icons/download.svg", FileAction::Download),
+                                                        ("delete", "icons/trash-2.svg", FileAction::Delete),
+                                                    ].into_iter().map(|(key, icon, action)| {
+                                                        let target = entry.path.clone();
+                                                        div().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(
+                                                        self.button(SharedString::from(format!("file-{key}-{}", entry.path)), "")
+                                                            .when(key == "copy", |button| button.icon(IconName::Copy))
+                                                            .when(key != "copy", |button| button.svg_icon(icon)).ghost().w(px(action_size)).h(px(action_size))
+                                                            .when(key == "download", |button| button.primary())
+                                                            .when(key == "delete", |button| button.danger())
+                                                            .tooltip(format!("{} · {}", self.t(key), entry.name))
+                                                            .disabled(pane.files.loading || !pane.files.loaded || pane.state != ConnectionState::Connected)
+                                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                                cx.stop_propagation();
+                                                                this.file_direct_action(owner, listing_request, target.clone(), action, window, cx);
+                                                            })))
+                                                    })).into_any_element();
                                                     let click_path = path.clone();
                                                     let rc_path = path.clone();
                                                     column_row(
@@ -1400,6 +1423,8 @@ impl Workbench {
                                                 .child(
                                                     div()
                                                         .flex_1()
+                                                        .id(SharedString::from(format!("file-name-{}", entry.path)))
+                                                        .tooltip({ let path = entry.path.clone(); move |window, cx| gpui_component::tooltip::Tooltip::new(path.clone()).build(window, cx) })
                                                         .min_w_0()
                                                         .overflow_hidden()
                                                         .child(format!(
@@ -1410,8 +1435,8 @@ impl Workbench {
                                                 )
                                                 .into_any_element(),
                                             size_label,
-                                            date_label,
                                             false,
+                                            actions,
                                         )
                                         .id(SharedString::from(path.clone()))
                                         .py(px(4.))
@@ -1457,7 +1482,8 @@ impl Workbench {
                                                     // Selection already happened in mouse_down with
                                                     // modifier support; clicks only open (double-click
                                                     // by mouse, single activation by keyboard).
-                                                    let open = event.click_count() >= 2
+                                                    let modifiers = event.modifiers();
+                                                    let open = (event.click_count() >= 2 && !modifiers.shift && !modifiers.control && !modifiers.platform)
                                                         || matches!(event, ClickEvent::Keyboard(_));
                                                     if open {
                                                         this.file_row_action(
@@ -1580,13 +1606,13 @@ impl Workbench {
                                                 no_targets || busy,
                                                 {
                                                     let label = this.t("delete").to_string();
-                                                    let color = theme::Palette::new(this.prefs.theme);
+                                                    let color = theme::Palette::new(this.prefs.effective_theme());
                                                     move |_, _| {
                                                         div()
                                                             .text_color(if no_targets || busy {
                                                                 color.muted
                                                             } else {
-                                                                color.error
+                                                                color.buttons.danger.ink
                                                             })
                                                             .child(label.clone())
                                                     }
@@ -1621,50 +1647,34 @@ impl Workbench {
     }
     /// Capture the current selection as this session's copy buffer.
     pub(super) fn copy_file_selection(&mut self, owner: Owner, cx: &mut Context<Self>) {
-        if let Some(pane) = self.pane_mut(owner) {
-            if pane.state == ConnectionState::Connected && !pane.files.loading {
-                let paths = pane.files.selected_paths();
-                if !paths.is_empty() {
-                    pane.files.clipboard = Some(paths);
-                }
-            }
-        }
-        cx.notify();
+        let paths = self
+            .pane(owner)
+            .map(|pane| pane.files.selected_paths())
+            .unwrap_or_default();
+        self.copy_file_targets(owner, paths, cx);
     }
     /// Paste the copy buffer into the directory on screen: name collisions
     /// are rejected up front so the remote copy never nests or overwrites.
     pub(super) fn paste_file_clipboard(&mut self, owner: Owner, cx: &mut Context<Self>) {
-        let exists_label = self.t("paste_exists").to_string();
-        let Some(pane) = self.pane_mut(owner) else {
+        let Some(pane) = self.pane(owner) else {
             return;
         };
-        if pane.state != ConnectionState::Connected || pane.files.loading {
-            return;
-        }
-        let Some(sources) = pane.files.clipboard.clone() else {
+        let Some(clipboard) = pane
+            .files
+            .clipboard
+            .clone()
+            .filter(|clipboard| clipboard.owner == owner)
+        else {
             return;
         };
-        let target_dir = pane.files.path.clone();
-        for source in &sources {
-            let name = source.rsplit('/').next().unwrap_or(source);
-            let destination = if target_dir == "/" {
-                format!("/{}", name)
-            } else {
-                format!("{}/{}", target_dir, name)
-            };
-            if pane.files.entries.iter().any(|e| e.path == destination) {
-                pane.files.error = Some(format!("{}: {}", name, exists_label));
-                cx.notify();
-                return;
-            }
-        }
-        let request = Id::new_v4();
-        self.backend.file_operation(
-            owner,
-            request,
-            crate::services::FileOperation::Copy(sources, target_dir),
+        let origin = FileSnapshot::capture(pane, Vec::new());
+        let target = origin.directory.clone();
+        self.submit_file_operation(
+            origin,
+            crate::services::FileOperation::Copy(clipboard.sources, target),
+            false,
+            cx,
         );
-        cx.notify();
     }
     /// Expand a tree directory (always fetching the freshest listing) or
     /// collapse it (releasing the cached subtree so memory and row state
@@ -1758,7 +1768,7 @@ impl Workbench {
         content_width: f32,
         entity: Entity<Workbench>,
     ) -> Stateful<Div> {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let pane = self.pane(owner);
         let expanded = pane.is_some_and(|pane| pane.files.tree_expanded.contains(path));
         let has_children = pane.is_some_and(|pane| pane.files.tree_children.contains_key(path));
@@ -1901,7 +1911,7 @@ impl Workbench {
     /// the opening tab's session. Removal lives in the dialog footer;
     /// the modal body handles scrolling.
     pub(super) fn render_transfers(&self, owner: Owner, cx: &mut Context<Self>) -> AnyElement {
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let records: Vec<&TransferRecord> = self
             .transfers
             .iter()
@@ -2000,6 +2010,7 @@ impl Workbench {
                 if task.state.active() {
                     actions = actions.child(
                         self.button(("cancel-transfer", id.as_u128() as u64), self.t("cancel"))
+                            .warning()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.cancel_transfer(id, cx);
                             })),
@@ -2014,6 +2025,7 @@ impl Workbench {
                         let record = task.clone();
                         actions = actions.child(
                             self.button(("retry-transfer", id.as_u128() as u64), self.t("retry"))
+                                .primary()
                                 .on_click(cx.listener(move |this, _, w, cx| {
                                     this.retry_transfer(record.clone(), w, cx)
                                 })),

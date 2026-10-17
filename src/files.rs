@@ -23,6 +23,8 @@ pub struct FileEntry {
     pub symlink: bool,
     pub size: Option<u64>,
     pub modified: Option<u32>,
+    /// POSIX type and permission bits returned by this listing, if supplied by the server.
+    pub permissions: Option<u32>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stamp {
@@ -98,6 +100,139 @@ pub fn parent(path: &str) -> String {
         .unwrap_or_else(|| ".".into())
 }
 
+/// Render the server's mode, including file type and setuid/setgid/sticky bits.
+pub fn permission_text(mode: Option<u32>) -> String {
+    let Some(mode) = mode else {
+        return "—".into();
+    };
+    let mut text = String::with_capacity(10);
+    text.push(match mode & 0o170000 {
+        0o040000 => 'd',
+        0o120000 => 'l',
+        0o020000 => 'c',
+        0o060000 => 'b',
+        0o010000 => 'p',
+        0o140000 => 's',
+        _ => '-',
+    });
+    for (shift, special, lower, upper) in [
+        (6, 0o4000, 's', 'S'),
+        (3, 0o2000, 's', 'S'),
+        (0, 0o1000, 't', 'T'),
+    ] {
+        let bits = (mode >> shift) & 7;
+        text.push(if bits & 4 != 0 { 'r' } else { '-' });
+        text.push(if bits & 2 != 0 { 'w' } else { '-' });
+        text.push(if mode & special != 0 {
+            if bits & 1 != 0 { lower } else { upper }
+        } else if bits & 1 != 0 {
+            'x'
+        } else {
+            '-'
+        });
+    }
+    text
+}
+
+/// A copy source freezes its path and type; the backend rechecks both before copying.
+#[derive(Clone, Debug)]
+pub struct CopySource {
+    pub path: String,
+    pub directory: bool,
+    pub symlink: bool,
+}
+
+/// A lexical containment test for canonical POSIX paths, preserving component boundaries.
+pub fn contains_path(parent: &str, child: &str) -> bool {
+    parent == child
+        || child
+            .strip_prefix(parent.trim_end_matches('/'))
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Validate the entire copy batch before executing the verified session's quoted POSIX cp.
+pub async fn copy(remote: &Remote, sources: &[CopySource], target: &str) -> Result<()> {
+    if sources.is_empty() {
+        bail!("No copy sources");
+    }
+    let sftp = remote.sftp().await?;
+    if !sftp.symlink_metadata(target).await?.file_type().is_dir() {
+        bail!("Copy target is not a regular directory");
+    }
+    let target = sftp.canonicalize(target).await?;
+    let mut destinations = std::collections::HashSet::new();
+    for source in sources {
+        validate_delete_target(&source.path)?;
+        let kind = sftp.symlink_metadata(&source.path).await?.file_type();
+        if source.symlink
+            || kind.is_symlink()
+            || (!kind.is_file() && !kind.is_dir())
+            || kind.is_dir() != source.directory
+        {
+            bail!(
+                "Copy source type changed or is unsupported: {}",
+                source.path
+            );
+        }
+        let canonical = sftp.canonicalize(&source.path).await?;
+        if source.directory && contains_path(&canonical, &target) {
+            bail!("A directory cannot be copied into itself or its descendants");
+        }
+        let destination = join(&target, source.path.rsplit('/').next().unwrap_or(""))?;
+        if !destinations.insert(destination.clone()) || sftp.try_exists(&destination).await? {
+            bail!("Copy target already exists: {destination}");
+        }
+        let mut pending = vec![source.path.clone()];
+        while let Some(path) = pending.pop() {
+            if remote.cancel.is_cancelled() {
+                bail!("Connection closed during copy preflight");
+            }
+            let kind = sftp.symlink_metadata(&path).await?.file_type();
+            if kind.is_symlink() || (!kind.is_file() && !kind.is_dir()) {
+                bail!("Copy does not follow symbolic links or special files: {path}");
+            }
+            if kind.is_dir() {
+                for entry in sftp.read_dir(&path).await? {
+                    pending.push(join(&path, &entry.file_name())?);
+                }
+            }
+        }
+    }
+    if remote.cancel.is_cancelled() {
+        bail!("Connection closed before copy");
+    }
+    let mut command = String::from("cp -R --");
+    for source in sources {
+        command.push(' ');
+        command.push_str(&crate::services::shell_quote(&source.path));
+    }
+    command.push(' ');
+    command.push_str(&crate::services::shell_quote(&target));
+    remote.run(&command).await
+}
+
+/// Validate source type, same-directory naming and destination collision in the worker.
+pub async fn rename(remote: &Remote, from: &str, to: &str) -> Result<()> {
+    validate_delete_target(from)?;
+    validate_delete_target(to)?;
+    if parent(from) != parent(to) {
+        bail!("Rename must stay in the same directory");
+    }
+    let sftp = remote.sftp().await?;
+    let kind = sftp.symlink_metadata(from).await?.file_type();
+    if !kind.is_file() && !kind.is_dir() && !kind.is_symlink() {
+        bail!("Cannot rename a special file");
+    }
+    if sftp.try_exists(to).await? {
+        bail!("Rename target already exists");
+    }
+    if remote.cancel.is_cancelled() {
+        bail!("Connection closed before rename");
+    }
+    sftp.rename(from, to).await?;
+    Ok(())
+}
+
 /// Canonicalize the requested directory, preserving hidden files in the returned model.
 pub async fn list(remote: &Remote, path: &str) -> Result<(String, Vec<FileEntry>)> {
     let sftp = remote.sftp().await?;
@@ -120,6 +255,7 @@ pub async fn list(remote: &Remote, path: &str) -> Result<(String, Vec<FileEntry>
             symlink: kind.is_symlink(),
             size: metadata.size,
             modified: metadata.mtime,
+            permissions: metadata.permissions,
         });
     }
     entries.sort_by(|a, b| {

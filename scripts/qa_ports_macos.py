@@ -30,12 +30,16 @@ def ports(count=48):
 
 
 def draw_ports(driver, label):
-    """Wait for a fresh GPUI prepaint, not just a QA command acknowledgement."""
+    """Wait for fresh content and the scrollbar frame that consumes its scroll bounds."""
     state = driver.wait(lambda s: s.get("port_view") is not None, label + " opened")
-    prior = state["port_view"]["revision"]
-    driver.action("draw")
-    return driver.wait(lambda s: s.get("port_view") is not None
-                       and s["port_view"]["revision"] > prior, label + " repainted")
+    # The overlay reads ScrollHandle bounds from the preceding prepaint. After
+    # filtering changes the viewport, one new content frame still has old track bounds.
+    for _ in range(2):
+        prior = state["port_view"]["revision"]
+        driver.action("draw")
+        state = driver.wait(lambda s: s.get("port_view") is not None
+                            and s["port_view"]["revision"] > prior, label + " repainted")
+    return state
 
 
 def assert_toolbar(bounds):
@@ -43,8 +47,9 @@ def assert_toolbar(bounds):
     toolbar, controls = bounds["toolbar"], bounds["controls"]
     filters, status = bounds["filters"], bounds["status"]
     assert controls["y"] >= toolbar["y"] and controls["y"] + controls["height"] <= toolbar["y"] + toolbar["height"] + 1
-    assert filters["x"] >= toolbar["x"] + 12 - 1 and filters["x"] + filters["width"] <= status["x"] + 1
-    assert status["width"] > 16 and status["x"] + status["width"] <= toolbar["x"] + toolbar["width"] - 12 + 1
+    assert abs(filters["x"] - toolbar["x"] - 8) <= 1
+    assert abs(status["x"] - filters["x"] - filters["width"] - 8) <= 1
+    assert status["width"] > 16 and abs(status["x"] + status["width"] - toolbar["x"] - toolbar["width"] + 8) <= 1
 
 
 def check_layout(state, width, height, size):
@@ -53,7 +58,8 @@ def check_layout(state, width, height, size):
     view = state["port_view"]
     bounds = view["geometry"]
     assert state["width"] == width and state["height"] == height, state
-    assert frame and frame["width"] + 2 <= 640 and frame["height"] + 2 <= 560, frame
+    expected_width = min(640 + max(size - 14, 0) * 16, width - 32)
+    assert frame and abs(frame["width"] + 2 - expected_width) <= 1 and frame["height"] + 2 <= 560, frame
     assert frame["y"] >= 23 and frame["y"] + frame["height"] <= height - 23, frame
     assert abs(frame["x"] + frame["width"] / 2 - width / 2) <= 2, frame
     assert abs(frame["y"] + frame["height"] / 2 - height / 2) <= 2, frame

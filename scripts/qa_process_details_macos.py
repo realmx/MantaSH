@@ -21,6 +21,7 @@ def draw(driver):
 def centered(state, width=640):
     """Assert measured GPUI frame position and size against the actual viewport."""
     box = state["dialog_frame_bounds"]
+    width = min(width + max(state["preferences"]["ui_size"] - 14, 0) * 16, state["width"] - 32)
     assert abs(box["width"] + 2 - width) <= 1, box
     assert abs(box["x"] + box["width"] / 2 - state["width"] / 2) <= 1, box
     assert abs(box["y"] + box["height"] / 2 - state["height"] / 2) <= 1, box

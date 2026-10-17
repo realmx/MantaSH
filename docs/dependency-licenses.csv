@@ -257,7 +257,7 @@ gpu-alloc,0.6.2,MIT OR Apache-2.0,,https://github.com/zakarumych/gpu-alloc,regis
 gpu-alloc-ash,0.7.1,MIT OR Apache-2.0,,https://github.com/zakarumych/gpu-alloc,registry+https://github.com/rust-lang/crates.io-index
 gpu-alloc-types,0.3.1,MIT OR Apache-2.0,,https://github.com/zakarumych/gpu-alloc,registry+https://github.com/rust-lang/crates.io-index
 gpui,0.2.2,Apache-2.0,,https://github.com/zed-industries/zed,registry+https://github.com/rust-lang/crates.io-index
-gpui-component,0.5.1,Apache-2.0,,https://github.com/longbridge/gpui-component,registry+https://github.com/rust-lang/crates.io-index
+gpui-component,0.5.1,Apache-2.0,,https://github.com/longbridge/gpui-component,MantaSH workspace
 gpui-component-assets,0.5.1,Apache-2.0,,https://github.com/longbridge/gpui-component,registry+https://github.com/rust-lang/crates.io-index
 gpui-component-macros,0.5.1,Apache-2.0,,,registry+https://github.com/rust-lang/crates.io-index
 gpui-macros,0.2.2,Apache-2.0,,,registry+https://github.com/rust-lang/crates.io-index

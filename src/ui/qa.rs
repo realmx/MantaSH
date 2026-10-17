@@ -13,6 +13,13 @@ pub struct Request {
 fn default_click_count() -> i64 {
     1
 }
+/// Legacy-shaped input exists only in the opt-in fixture driver, never persisted.
+#[derive(Deserialize)]
+pub struct HistoryFixtureEntry {
+    id: Id,
+    scope: String,
+    command: String,
+}
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
@@ -37,12 +44,19 @@ pub enum Action {
     WindowMenuProbe,
     /// Select the first item of this process's real AppKit application menu.
     ApplicationAboutMenu,
-    /// Close this isolated process's native About panel without touching the workbench.
-    ApplicationAboutClose,
     /// Seed disconnected SSH views and public command fixtures without opening any transport.
     HistoryFixture {
-        entries: Vec<HistoryEntry>,
+        entries: Vec<HistoryFixtureEntry>,
     },
+    /// Open the production modal on an isolated real PTY, including local test panes.
+    HistoryOpen,
+    /// Replay a captured history callback through the production submission gate.
+    HistoryInvoke {
+        target: history::HistoryTarget,
+        command: String,
+        execute: bool,
+    },
+    HistoryReviewDelete,
     HistoryQuery {
         query: String,
     },
@@ -132,6 +146,9 @@ pub enum Action {
     PortsDisconnect,
     Keystroke {
         key: String,
+        /// Opt in to a complete key cycle; existing text-entry QA remains key-down only.
+        #[serde(default)]
+        release: bool,
     },
     Paste {
         text: String,
@@ -203,6 +220,14 @@ pub enum Action {
     SubmitCredentials,
     Sidebar,
     Settings,
+    ToggleSetting {
+        key: String,
+    },
+    /// Focus the real switch; activation remains a dispatched keyboard event.
+    FocusSetting {
+        key: String,
+    },
+    ResetSettings,
     SshForm,
     /// Open the production font picker from the settings modal.
     OpenFontPicker {
@@ -331,6 +356,18 @@ pub enum Action {
         #[serde(default)]
         double: bool,
     },
+    FileDirect {
+        session: Id,
+        attempt: Id,
+        request: Id,
+        path: String,
+        verb: String,
+    },
+    FileNameInput {
+        value: String,
+    },
+    ConfirmFileOperation,
+    PasteFiles,
     ToggleHiddenFiles,
     ReviewFileDelete,
     StageTransfer {
@@ -350,6 +387,21 @@ pub enum Action {
     Edit {
         text: String,
     },
+    /// Exercise the real editor replacement/history, without exposing document content.
+    EditorInsert {
+        text: String,
+    },
+    EditorView {
+        start: usize,
+        end: usize,
+        reversed: bool,
+        y: f32,
+    },
+    EditorFormat,
+    EditorCompose {
+        text: String,
+    },
+    EditorUnmark,
     Save,
     Encoding {
         encoding: crate::encoding::Encoding,
@@ -381,6 +433,7 @@ pub(super) struct Controller {
     sequence: u64,
     last_snapshot: Instant,
     pub(super) header_controls: HashMap<&'static str, Bounds<Pixels>>,
+    pub(super) settings_switch_bounds: HashMap<&'static str, Bounds<Pixels>>,
     /// Painted connection row bounds keyed by profile UUID; uniform_list only
     /// reports the rows it actually laid out, so entries follow visibility.
     pub(super) connection_rows: HashMap<u128, Bounds<Pixels>>,
@@ -389,6 +442,7 @@ pub(super) struct Controller {
     pub(super) connection_add_bounds: Option<Bounds<Pixels>>,
     pub(super) modal_bounds: Option<Bounds<Pixels>>,
     pub(super) dialog_frame_bounds: Option<Bounds<Pixels>>,
+    pub(super) dialog_revision: u64,
     pub(super) transfer_footer_bounds: Option<Bounds<Pixels>>,
     pub(super) process_footer_bounds: Option<Bounds<Pixels>>,
     pub(super) process_geometry: HashMap<&'static str, Bounds<Pixels>>,
@@ -449,10 +503,12 @@ impl Controller {
             connection_add_bounds: None,
             modal_bounds: None,
             dialog_frame_bounds: None,
+            dialog_revision: 0,
             transfer_footer_bounds: None,
             process_footer_bounds: None,
             process_geometry: HashMap::new(),
             header_controls: HashMap::new(),
+            settings_switch_bounds: HashMap::new(),
             transfer_geometry: HashMap::new(),
             connection_rows: HashMap::new(),
             remote_root: std::env::var("MANTASH_QA_REMOTE_ROOT").ok(),
@@ -863,15 +919,6 @@ impl Workbench {
                     Err(error) => self.notice = Some(error.to_string()),
                 }
             }
-            Action::ApplicationAboutClose => {
-                #[cfg(target_os = "macos")]
-                cx.spawn(async move |_, _| {
-                    if let Err(error) = window_native::close_about_panel() {
-                        eprintln!("About QA close failed: {error}");
-                    }
-                })
-                .detach();
-            }
             Action::WindowMenuProbe => {
                 #[cfg(target_os = "macos")]
                 if let Ok(menu) = window_native::prepare_system_menu(window) {
@@ -913,7 +960,25 @@ impl Workbench {
                 if profiles.len() != 2 {
                     return;
                 }
-                self.history = entries;
+                let mut history = HistoryCatalog::default();
+                for entry in entries {
+                    let Some(scope) = HistoryScope::group_of(&entry.scope) else {
+                        return;
+                    };
+                    history.items.push(HistoryItem {
+                        id: entry.id,
+                        command: entry.command.trim().into(),
+                    });
+                    match scope {
+                        HistoryScope::Local => &mut history.local_ids,
+                        HistoryScope::Ssh => &mut history.ssh_ids,
+                    }
+                    .push(entry.id);
+                }
+                if history.validate().is_err() {
+                    return;
+                }
+                self.history = history;
                 for (index, id) in profiles.into_iter().enumerate() {
                     let profile = Profile {
                         id,
@@ -941,17 +1006,39 @@ impl Workbench {
                     });
                 }
                 self.active = self.tabs.len() - 1;
-                self.show_modal(Modal::LocalHistory, window, cx);
+                self.open_history(window, cx);
+            }
+            Action::HistoryOpen => self.open_history(window, cx),
+            Action::HistoryInvoke {
+                target,
+                command,
+                execute,
+            } => {
+                if command.len() <= 4096 {
+                    if execute {
+                        self.execute_history(target, &command, window, cx);
+                    } else {
+                        self.insert_history(target, &command, window, cx);
+                    }
+                }
+            }
+            Action::HistoryReviewDelete => {
+                if let Some(target) = self.history_target() {
+                    let snapshot = self.history_delete_snapshot(target, cx);
+                    self.review_history_delete(snapshot, window, cx);
+                }
             }
             Action::HistoryQuery { query } => {
-                if let Some(scope) = self.active_pane().map(|pane| pane.spec.history_scope()) {
+                if let Some(target) = self.history_target() {
+                    let scope = target.scope;
                     let search = self.history_views[scope.index()].search.clone();
                     search.update(cx, |input, cx| input.set_value(query, window, cx));
                     search.focus_handle(cx).focus(window);
                 }
             }
             Action::HistoryScroll { y } => {
-                if let Some(scope) = self.active_pane().map(|pane| pane.spec.history_scope()) {
+                if let Some(target) = self.history_target() {
+                    let scope = target.scope;
                     self.history_views[scope.index()]
                         .scroll
                         .set_offset(point(px(0.), px(y)));
@@ -962,7 +1049,8 @@ impl Workbench {
                 shift,
                 additive,
             } => {
-                if let Some(scope) = self.active_pane().map(|pane| pane.spec.history_scope()) {
+                if let Some(target) = self.history_target() {
+                    let scope = target.scope;
                     let visible = self
                         .visible_history(scope, cx)
                         .iter()
@@ -1138,13 +1226,22 @@ impl Workbench {
                         .set_offset(point(px(0.), px(y)));
                 }
             }
-            Action::Keystroke { key } => match Keystroke::parse(&key) {
+            Action::Keystroke { key, release } => match Keystroke::parse(&key) {
                 Ok(keystroke) => {
-                    // Use the public keyboard dispatcher so native keymap precedence and
-                    // focus routing are tested. Release Workbench's update borrow first.
-                    window.defer(cx, move |window, cx| {
-                        window.dispatch_keystroke(keystroke, cx);
-                    });
+                    if release {
+                        #[cfg(target_os = "macos")]
+                        if matches!(self.modal, Some(Modal::Settings)) {
+                            match window_native::prepare_test_key_cycle(window, &key) {
+                                Ok(keys) => cx.spawn(async move |_, _| keys.post()).detach(),
+                                Err(error) => self.notice = Some(error.to_string()),
+                            }
+                        }
+                    } else {
+                        // Use the public dispatcher, after releasing Workbench's update borrow.
+                        window.defer(cx, move |window, cx| {
+                            window.dispatch_keystroke(keystroke, cx);
+                        });
+                    }
                 }
                 Err(error) => self.notice = Some(format!("Invalid QA keystroke: {error}")),
             },
@@ -1323,6 +1420,16 @@ impl Workbench {
             }
             Action::Sidebar => self.toggle_sidebar(window, cx),
             Action::Settings => self.open_settings(window, cx),
+            Action::ToggleSetting { key } => self.toggle_setting(&key, window, cx),
+            Action::FocusSetting { key } => {
+                if matches!(self.modal, Some(Modal::Settings)) {
+                    if let Some(focus) = self.settings_switch_focus.get(key.as_str()) {
+                        focus.focus(window);
+                        cx.notify();
+                    }
+                }
+            }
+            Action::ResetSettings => self.reset_settings(window, cx),
             Action::About => self.show_modal(Modal::About, window, cx),
             Action::SshForm => self.profile_form(None, None, window, cx),
             Action::OpenFontPicker { terminal } => self.open_font_picker(terminal, window, cx),
@@ -1423,6 +1530,7 @@ impl Workbench {
                         reason: crate::credentials::PromptReason::Missing,
                         secret,
                         show_secret: false,
+                        remember: self.prefs.remember_credentials,
                         reply: Some(reply),
                     },
                     window,
@@ -1454,8 +1562,7 @@ impl Workbench {
                 cx,
             ),
             Action::Theme { night } => {
-                self.prefs.theme = if night { Theme::Night } else { Theme::Day };
-                self.apply_preferences(window, cx);
+                self.select_theme(if night { Theme::Night } else { Theme::Day }, window, cx)
             }
             Action::Language { english } => {
                 self.prefs.language = if english { Language::En } else { Language::Zh };
@@ -1481,7 +1588,11 @@ impl Workbench {
             }
             Action::Profile { profile } => {
                 if matches!(profile.host.as_str(), "127.0.0.1" | "::1" | "localhost") {
+                    let existing = self.profiles.iter().any(|saved| saved.id == profile.id);
                     self.profile_form(Some(profile), None, window, cx);
+                    if let Some(Modal::Profile(form)) = &mut self.modal {
+                        form.qa_set_existing(existing);
+                    }
                 } else {
                     self.notice = Some("QA connections must use loopback".into());
                 }
@@ -1559,6 +1670,41 @@ impl Workbench {
                     cx,
                 );
             }
+            Action::FileDirect {
+                session,
+                attempt,
+                request,
+                path,
+                verb,
+            } => {
+                let action = match verb.as_str() {
+                    "rename" => Some(FileAction::Rename),
+                    "copy" => Some(FileAction::Copy),
+                    "delete" => Some(FileAction::Delete),
+                    _ => None,
+                };
+                if let Some(action) = action {
+                    self.file_direct_action(
+                        Owner { session, attempt },
+                        Some(request),
+                        path,
+                        action,
+                        window,
+                        cx,
+                    );
+                }
+            }
+            Action::FileNameInput { value } => {
+                if let Some(Modal::FileName { input, .. }) = &self.modal {
+                    input.update(cx, |input, cx| input.set_value(value, window, cx));
+                }
+            }
+            Action::ConfirmFileOperation => self.confirm_file_operation(cx),
+            Action::PasteFiles => {
+                if let Some(owner) = self.active_owner() {
+                    self.paste_file_clipboard(owner, cx);
+                }
+            }
             Action::ToggleHiddenFiles => {
                 if let Some(owner) = self.active_owner() {
                     self.toggle_hidden_files(owner, cx);
@@ -1631,6 +1777,66 @@ impl Workbench {
                     }
                 }
             }
+            Action::EditorInsert { text } => {
+                if let Some(doc) = self
+                    .active_pane()
+                    .and_then(|p| p.documents.iter().find(|d| Some(d.id) == p.active_document))
+                {
+                    doc.input.update(cx, |state, cx| {
+                        state.replace_text_in_range(None, &text, window, cx)
+                    });
+                }
+            }
+            Action::EditorView {
+                start,
+                end,
+                reversed,
+                y,
+            } => {
+                if let Some(doc) = self
+                    .active_pane()
+                    .and_then(|p| p.documents.iter().find(|d| Some(d.id) == p.active_document))
+                {
+                    doc.input.update(cx, |state, cx| {
+                        state.set_edit_snapshot(
+                            &gpui_component::input::EditSnapshot {
+                                selection: start..end,
+                                reversed,
+                                scroll: point(px(0.), px(y)),
+                            },
+                            cx,
+                        );
+                        state.focus(window, cx);
+                    });
+                }
+            }
+            Action::EditorFormat => {
+                if let Some((owner, id)) = self
+                    .active_pane()
+                    .and_then(|p| p.active_document.map(|id| (p.owner, id)))
+                {
+                    self.format_document(owner, id, window, cx);
+                }
+            }
+            Action::EditorCompose { text } => {
+                if let Some(doc) = self
+                    .active_pane()
+                    .and_then(|p| p.documents.iter().find(|d| Some(d.id) == p.active_document))
+                {
+                    doc.input.update(cx, |state, cx| {
+                        state.replace_and_mark_text_in_range(None, &text, None, window, cx)
+                    });
+                }
+            }
+            Action::EditorUnmark => {
+                if let Some(doc) = self
+                    .active_pane()
+                    .and_then(|p| p.documents.iter().find(|d| Some(d.id) == p.active_document))
+                {
+                    doc.input
+                        .update(cx, |state, cx| state.unmark_text(window, cx));
+                }
+            }
             Action::Save => {
                 if let Some((owner, id)) = self
                     .active_pane()
@@ -1660,6 +1866,7 @@ impl Workbench {
             }
             Action::Tab { index } => {
                 if index < self.tabs.len() {
+                    self.invalidate_commit_navigation();
                     self.active = index;
                     self.focus_active(window, cx);
                     self.changed(cx);
@@ -1683,13 +1890,7 @@ impl Workbench {
                 ),
                 Err(error) => self.notice = Some(error.to_string()),
             },
-            Action::ConfirmImport => {
-                if let Some(Modal::Import { preview, replace }) = &self.modal {
-                    self.profiles = crate::connections::merge(&self.profiles, preview, *replace);
-                    self.backend.save_profiles(self.profiles.clone());
-                }
-                self.dismiss(window, cx);
-            }
+            Action::ConfirmImport => self.submit_import(cx),
             Action::CloseDocument => {
                 if let Some((owner, id)) = self
                     .active_pane()
@@ -1720,6 +1921,18 @@ impl Workbench {
             "current_focus": current_focus,
             "focus_within": self.modal.is_some() && window.focused(cx).is_some(),
         })
+    }
+    fn qa_editor(&self, cx: &App) -> serde_json::Value {
+        use sha2::{Digest, Sha256};
+        self.active_pane().and_then(|p| p.documents.iter().find(|d| Some(d.id) == p.active_document)).map(|doc| {
+            let input = doc.input.read(cx);
+            let text = input.value();
+            let view = input.edit_snapshot();
+            serde_json::json!({"sha256": format!("{:x}", Sha256::digest(text.as_bytes())), "bytes": text.len(),
+                "selection": [view.selection.start, view.selection.end], "reversed": view.reversed,
+                "scroll_y": f32::from(view.scroll.y), "formatting": doc.formatting.is_some(),
+                "dirty": doc.dirty, "revision": doc.revision, "error": doc.error})
+        }).unwrap_or(serde_json::Value::Null)
     }
 
     pub(super) fn qa_tick(&mut self, window: &Window, cx: &mut Context<Self>) {
@@ -1768,7 +1981,7 @@ impl Workbench {
                 serde_json::json!(f32::from(tab.scroll.bounds().size.height));
         }
         let delete_targets = match &self.modal {
-            Some(Modal::DeleteFiles { owner, paths }) => Some(
+            Some(Modal::DeleteFiles { owner, paths, .. }) => Some(
                 serde_json::json!({"session":owner.session,"attempt":owner.attempt,"paths":paths}),
             ),
             _ => None,
@@ -1898,10 +2111,10 @@ impl Workbench {
             "returning":self.connection_return,
             "form":match &self.modal {Some(Modal::Profile(form))=>Some(form.qa_metadata(cx)),_=>None},
         });
-        let history_view = self.active_pane().map(|pane| {
-            let scope = pane.spec.history_scope();
+        let history_view = self.history_target().map(|target| {
+            let scope = target.scope;
             let view = &self.history_views[scope.index()];
-            serde_json::json!({"scope":scope,"query":view.search.read(cx).value(),"rows":self.visible_history(scope, cx).iter().map(|entry|entry.id).collect::<Vec<_>>(),
+            serde_json::json!({"target":target,"can_insert":self.can_insert_history(target, cx),"scope":scope,"query":view.search.read(cx).value(),"rows":self.visible_history(scope, cx).iter().map(|entry|entry.id).collect::<Vec<_>>(),
                 "selected":view.selected.iter().copied().collect::<Vec<_>>(),"anchor":view.anchor,"modal_bounds":self.qa.as_ref().and_then(|qa| qa.modal_bounds.map(Self::qa_bounds)),"adaptive_height":self.resource_modal_height,"content_marker":self.history_content_marker.get().map(Self::qa_bounds),"scroll_y":f32::from(view.scroll.offset().y),"max_y":f32::from(view.scroll.max_offset().height),"bounds":Self::qa_bounds(view.scroll.bounds())})
         });
         let transfer_selection = serde_json::json!({"selected":self.transfer_selected.iter().copied().collect::<Vec<_>>(),"anchor":self.transfer_anchor});
@@ -1909,10 +2122,6 @@ impl Workbench {
         let application_menu = window_native::application_menu_snapshot();
         #[cfg(not(target_os = "macos"))]
         let application_menu = serde_json::Value::Null;
-        #[cfg(target_os = "macos")]
-        let about_panel = window_native::about_panel_snapshot();
-        #[cfg(not(target_os = "macos"))]
-        let about_panel = serde_json::Value::Null;
         #[cfg(target_os = "macos")]
         let system_window_menu = window_native::system_menu_snapshot();
         #[cfg(not(target_os = "macos"))]
@@ -1964,14 +2173,38 @@ impl Workbench {
             "notice": self.notice,
             "active_tab": self.active,
             "tabs": tabs,
-            "history_count": self.history.len(),
+            "history_count": self.history.items.len(),
             "profiles": self.profiles.len(),
             "profile_order": self.profiles.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
             "width": f32::from(window.viewport_size().width),
             "height": f32::from(window.viewport_size().height)
         });
+        state["file_operations"] = self.active_pane().map(|pane| serde_json::json!({
+            "pending":pane.files.pending.len(),
+            "clipboard":pane.files.clipboard.as_ref().map(|clipboard| clipboard.sources.iter().map(|source| &source.path).collect::<Vec<_>>()),
+        })).unwrap_or_default();
+        state["commit"] = serde_json::json!({"busy":self.modal_commit.busy(),"error":self.modal_commit.error,"committed":self.modal_commit.committed});
+        state["editor"] = self.qa_editor(cx);
+        state["dialog_revision"] = self.qa.as_ref().map(|qa| qa.dialog_revision).into();
         state["application_menu"] = application_menu;
-        state["about_panel"] = about_panel;
+        state["active_window"] = serde_json::json!(cx.active_window().is_some());
+        state["settings_switch_focus"] =
+            serde_json::json!(settings::SWITCH_KEYS.into_iter().find(|key| {
+                self.settings_switch_focus
+                    .get(key)
+                    .is_some_and(|focus| focus.is_focused(window))
+            }));
+        state["settings_switch_bounds"] = serde_json::json!(
+            self.qa
+                .as_ref()
+                .map(|qa| qa
+                    .settings_switch_bounds
+                    .iter()
+                    .filter(|_| matches!(self.modal, Some(Modal::Settings)))
+                    .map(|(key, bounds)| (*key, Self::qa_bounds(*bounds)))
+                    .collect::<HashMap<_, _>>())
+                .unwrap_or_default()
+        );
         state["transfer_view"] = serde_json::to_value(transfer_view).unwrap_or_default();
         state["transfer_stop_targets"] =
             serde_json::to_value(transfer_stop_targets).unwrap_or_default();

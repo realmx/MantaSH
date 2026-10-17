@@ -15,6 +15,8 @@ MantaSH 自有代码、品牌与文档使用 GPL-3.0-or-later，完整文本见 
 
 精确版本、许可证表达式及源地址由锁定的 Cargo 元数据生成，见 [完整依赖许可清单](docs/dependency-licenses.csv)。发布时按该清单随分发提供需要保留的许可证、版权声明和对应源代码义务。
 
+`vendor/gpui-component` 保留上游 0.5.1 源码及 [Apache-2.0 许可证](vendor/gpui-component/LICENSE-APACHE)，通过 Cargo 本地 patch 提供编辑事务、撤销分组和选区/滚动恢复扩展，并修正按钮悬停前景色遵循其 variant；修改范围见 [补丁说明](vendor/gpui-component/MANTASH-PATCH.md)。版本未升级，Assets 依赖仍使用锁定的上游包。依赖清单中该包的 `MantaSH workspace` 表示本地路径来源，不表示其版权或许可证归属改变。
+
 系统字体由用户平台提供。MantaSH SVG 与位图资产为本工程原创几何图形。OpenSSH sftp-server 仅在测试中调用系统安装的程序，未随项目复制其二进制。
 
 Lucide 图标及其 Feather 来源的完整授权文本另存于 [assets/LUCIDE-LICENSE](assets/LUCIDE-LICENSE)，与组件库代码许可分别保留。

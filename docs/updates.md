@@ -28,20 +28,15 @@ macOS 自动安装仅支持 `/Applications/MantaSH.app` 或 `~/Applications/Mant
 
 ## 自动化验证
 
-基础检查：
+先运行[基础检查](development.md#必做检查)，再执行更新界面的专项测试：
 
 ```sh
-cargo fmt --all -- --check
-cargo test --locked --no-default-features --all-targets
 cargo test --locked --lib ui::updates::tests
-cargo check --locked --no-default-features --all-targets
-cargo check --locked --all-targets
-python3 scripts/check_docs.py
 ```
 
 后端回归覆盖版本比较、平台资源选择、下载大小及校验、HTTP 错误、取消和安装脚本。隔离 HTTP fixture 只存在于测试，正式客户端不接受环境变量指定任意更新源。测试不替换正在使用的 MantaSH 应用。
 
-debug 原生 QA 驱动需要同时指定全新的 `MANTASH_DATA_DIR` 和 `MANTASH_QA_CONTROL`。隔离运行默认不自动访问版本源；发送 `check_updates` 动作可以立即检查正式 GitHub Release，附加 `"manual": true` 则走设置按钮相同的手动路径。快照的 `update` 字段包含阶段、是否手动、候选版本、下载字节数、是否已准备、是否有活动请求和本次已拒绝版本。动作被接受不代表异步检查完成，应等待快照状态变化。
+debug 原生 QA 驱动需要同时指定全新的 `MANTASH_DATA_DIR` 和 `MANTASH_QA_CONTROL`。隔离运行默认不自动访问版本源；发送 `check_updates` 动作可以立即检查正式 GitHub Release，附加 `"manual": true` 则走关于弹窗按钮相同的手动路径。快照的 `update` 字段包含阶段、是否手动、候选版本、下载字节数、是否已准备、是否有活动请求和本次已拒绝版本。动作被接受不代表异步检查完成，应等待快照状态变化。
 
 原生提示/取消检查命令（需联网，调试二进制版本应低于最新稳定版）：
 

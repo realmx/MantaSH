@@ -4,18 +4,17 @@ use super::transfer_paths::transfer_progress_fraction;
 use super::*;
 use crate::{
     connections::{self, ImportPreview},
-    credentials::SecretStore,
     encoding::Encoding,
-    model::{Preferences, TransferRecord},
-    services::FileOperation,
+    model::TransferRecord,
 };
 use gpui_component::{
     IconName,
     checkbox::Checkbox,
-    menu::PopupMenuItem,
     plot::shape::{Arc as ProgressArc, ArcData},
 };
 
+use super::commits::AfterCommit;
+use crate::services::metadata::Mutation;
 pub(super) struct ProfileForm {
     id: Id,
     name: Entity<InputState>,
@@ -23,8 +22,6 @@ pub(super) struct ProfileForm {
     port: Entity<InputState>,
     username: Entity<InputState>,
     secret: Entity<InputState>,
-    secret_request: Id,
-    secret_loading: bool,
     remember: bool,
     reconnect: Option<Owner>,
     error: Option<String>,
@@ -34,12 +31,15 @@ pub(super) struct ProfileForm {
 }
 #[cfg(debug_assertions)]
 impl ProfileForm {
-    /// Expose only form identity and layout state to the isolated driver, never authentication input.
+    pub(super) fn qa_set_existing(&mut self, existing: bool) {
+        self.existing = existing;
+    }
+    /// Expose form metadata to the isolated driver without exposing passwords.
     pub(super) fn qa_metadata(&self, cx: &App) -> serde_json::Value {
         serde_json::json!({"id":self.id,"name":self.name.read(cx).value(),
             "cloning":self.cloning,"existing":self.existing,
             "secret_present":!self.secret.read(cx).value().is_empty(),
-            "secret_loading":self.secret_loading})
+            "username":self.username.read(cx).value(),"port":self.port.read(cx).value()})
     }
 }
 #[derive(Clone)]
@@ -62,10 +62,11 @@ pub(super) enum Modal {
         /// Drives the eye toggle: false keeps the input masked, true reveals
         /// the typed secret in place.
         show_secret: bool,
+        remember: bool,
         reply: Option<tokio::sync::oneshot::Sender<crate::credentials::CredentialReply>>,
     },
     Connections,
-    LocalHistory,
+    LocalHistory(history::HistoryTarget),
     DeleteHistory {
         owner: Owner,
         scope: HistoryScope,
@@ -105,10 +106,12 @@ pub(super) enum Modal {
         directory: String,
         original: Option<String>,
         input: Entity<InputState>,
+        origin: FileSnapshot,
     },
     DeleteFiles {
         owner: Owner,
         paths: Vec<String>,
+        origin: FileSnapshot,
     },
     Close(CloseTarget),
     Conflict {
@@ -185,6 +188,41 @@ pub(super) enum TransferPhase {
 }
 
 impl Modal {
+    /// Size for the content's structure, independently of modal navigation.
+    /// Keep useful input widths at 12–14px and add 16px per larger font step
+    /// for labels and actions. Live samples, filtering and long paths must not
+    /// make the frame jump; the renderer separately clamps it to the viewport.
+    fn preferred_width(&self, ui_size: f32) -> f32 {
+        let base = match self {
+            Modal::Encoding { .. } => 320.,
+            Modal::About | Modal::Credentials { .. } | Modal::FileName { .. } => 360.,
+            Modal::Font { .. }
+            | Modal::Conflict { .. }
+            | Modal::Close(CloseTarget::Document(_, _) | CloseTarget::Editor(_)) => 440.,
+            Modal::Settings | Modal::Update => 520.,
+            Modal::Profile(_) | Modal::Trust { .. } => 560.,
+            Modal::Connections
+            | Modal::LocalHistory(_)
+            | Modal::SystemTools { .. }
+            | Modal::ProcessDetails { .. }
+            | Modal::Transfers { .. } => 640.,
+            // The document uses its own font; UI text only affects its chrome.
+            Modal::Editor { .. } => return 960.,
+            Modal::WindowControls(_)
+            | Modal::ResourceDetails { .. }
+            | Modal::DeleteHistory { .. }
+            | Modal::DeleteProfiles { .. }
+            | Modal::DeleteFiles { .. }
+            | Modal::FollowLink { .. }
+            | Modal::Import { .. }
+            | Modal::Close(_)
+            | Modal::Transfer { .. }
+            | Modal::CancelTransfers { .. }
+            | Modal::ProcessConfirm { .. } => 480.,
+        };
+        base + (ui_size.clamp(14., 18.) - 14.) * theme::SPACE_SECTION
+    }
+
     /// Consequential review dialogs keep their established action-specific
     /// close behavior instead of participating in the ordinary parent stack.
     pub(super) fn is_confirmation(&self) -> bool {
@@ -210,7 +248,7 @@ impl Modal {
         match self {
             Modal::Credentials { .. } => "credentials",
             Modal::Connections => "connections",
-            Modal::LocalHistory => "history",
+            Modal::LocalHistory(_) => "history",
             Modal::DeleteHistory { .. } => "delete_history",
             Modal::FollowLink { .. } => "follow_link",
             Modal::Profile(_) => "profile",
@@ -240,6 +278,7 @@ impl Modal {
 }
 pub(super) struct ModalFrame {
     pub(super) modal: Modal,
+    pub(super) commit: commits::CommitState,
     pub(super) scroll: ScrollHandle,
     pub(super) focus: FocusHandle,
     /// The concrete input/button focus that was active before the child opened.
@@ -252,6 +291,8 @@ pub(super) struct ModalFrame {
 impl Workbench {
     /// Reset all per-instance handles before rendering a newly opened modal.
     fn reset_modal_state(&mut self, cx: &mut Context<Self>) {
+        self.modal_commit = Default::default();
+        self.import_request = None;
         self.modal_focus = cx.focus_handle();
         self.modal_scroll = ScrollHandle::new();
         self.font_highlight = None;
@@ -267,8 +308,10 @@ impl Workbench {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> ModalFrame {
+        self.modal_commit.suspend();
         ModalFrame {
             modal,
+            commit: std::mem::take(&mut self.modal_commit),
             scroll: std::mem::replace(&mut self.modal_scroll, ScrollHandle::new()),
             focus: std::mem::replace(&mut self.modal_focus, cx.focus_handle()),
             focused: window.focused(cx),
@@ -287,10 +330,10 @@ impl Workbench {
         self.history_return = self
             .modal_stack
             .last()
-            .and_then(|frame| {
-                matches!(&frame.modal, Modal::LocalHistory).then(|| self.active_owner())
-            })
-            .flatten();
+            .and_then(|frame| match &frame.modal {
+                Modal::LocalHistory(target) => Some(*target),
+                _ => None,
+            });
     }
 
     fn clear_return_markers(&mut self) {
@@ -312,7 +355,9 @@ impl Workbench {
             (Modal::Editor { owner: left }, Modal::Editor { owner: right }) if left == right
         ) || matches!(
             (current, next),
-            (Modal::Settings, Modal::Settings) | (Modal::Update, Modal::Update)
+            (Modal::Settings, Modal::Settings)
+                | (Modal::Update, Modal::Update)
+                | (Modal::About, Modal::About)
         )
     }
 
@@ -328,7 +373,7 @@ impl Workbench {
             self.cancel_update();
         }
         self.compact_sidebar_open = false;
-        if matches!(&modal, Modal::LocalHistory) {
+        if matches!(&modal, Modal::LocalHistory(_)) {
             self.notice = None;
         }
         if self
@@ -340,6 +385,7 @@ impl Workbench {
             return;
         }
 
+        self.invalidate_commit_navigation();
         let confirmation = modal.is_confirmation();
         if let Some(current) = self.modal.take() {
             let current_confirmation = current.is_confirmation();
@@ -354,7 +400,7 @@ impl Workbench {
             } else if confirmation && !current_confirmation {
                 let connection_parent = matches!(&current, Modal::Connections)
                     && matches!(&modal, Modal::DeleteProfiles { .. } | Modal::Import { .. });
-                let history_parent = matches!(&current, Modal::LocalHistory)
+                let history_parent = matches!(&current, Modal::LocalHistory(_))
                     && matches!(&modal, Modal::DeleteHistory { .. });
                 let editor_parent = match &current {
                     Modal::Editor { .. }
@@ -382,9 +428,13 @@ impl Workbench {
                         Modal::Editor { owner } => Some(*owner),
                         _ => None,
                     };
+                    let history_target = match &current {
+                        Modal::LocalHistory(target) if history_parent => Some(*target),
+                        _ => None,
+                    };
                     self.modal_confirm_return = Some(self.suspend_modal(current, window, cx));
                     self.connection_return = connection_parent;
-                    self.history_return = history_parent.then(|| self.active_owner()).flatten();
+                    self.history_return = history_target;
                     self.editor_return = editor_parent.then_some(owner).flatten();
                 } else {
                     // Other confirmations retain their existing page-level behavior.
@@ -429,16 +479,10 @@ impl Workbench {
                 };
                 input.focus_handle(cx).focus(window);
             }
-            Modal::LocalHistory => {
-                if let Some(pane) = self.active_pane() {
-                    self.history_views[pane.spec.history_scope().index()]
-                        .search
-                        .focus_handle(cx)
-                        .focus(window);
-                } else {
-                    self.modal_focus.focus(window);
-                }
-            }
+            Modal::LocalHistory(target) => self.history_views[target.scope.index()]
+                .search
+                .focus_handle(cx)
+                .focus(window),
             Modal::Font { filter, .. } => filter.focus_handle(cx).focus(window),
             Modal::SystemTools { owner, page } => {
                 let filter = self.pane(*owner).map(|pane| match page {
@@ -470,6 +514,7 @@ impl Workbench {
     fn restore_modal(&mut self, frame: ModalFrame, window: &mut Window, cx: &mut Context<Self>) {
         let ModalFrame {
             modal,
+            commit,
             scroll,
             focus,
             focused,
@@ -478,6 +523,8 @@ impl Workbench {
             resource_height,
         } = frame;
         self.modal = Some(modal);
+        self.modal_commit = commit;
+        self.import_request = None;
         self.modal_scroll = scroll;
         self.modal_focus = focus;
         self.font_highlight = font_highlight;
@@ -508,7 +555,7 @@ impl Workbench {
 
     /// Close the active modal and intentionally abandon every parent. Used by
     /// actions that leave the overlay entirely, such as opening a new session.
-    fn dismiss_to_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn dismiss_to_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.clear_modal_chain();
         self.dismiss(window, cx);
     }
@@ -527,6 +574,8 @@ impl Workbench {
             return;
         };
         let current_is_confirmation = current.is_confirmation();
+        self.modal_commit = Default::default();
+        self.import_request = None;
         let cancelled_owner = match &current {
             Modal::Trust {
                 owner,
@@ -623,18 +672,6 @@ impl Workbench {
             // Cancel the request before restoring Settings, so late results cannot reopen it.
             self.cancel_update();
         }
-        // Closing the editor with unsaved drafts asks save-or-revert first;
-        // clean documents close without interruption.
-        if let Some(Modal::Editor { owner }) = &self.modal {
-            let owner = *owner;
-            if self
-                .pane(owner)
-                .is_some_and(|p| p.documents.iter().any(|d| d.dirty))
-            {
-                self.show_modal(Modal::Close(CloseTarget::Editor(owner)), window, cx);
-                return;
-            }
-        }
         if let Some(Modal::CancelTransfers {
             owner,
             batch,
@@ -672,9 +709,8 @@ impl Workbench {
         }
         // Compatibility fallback for state created before the frame return
         // context was available.
-        if self.history_return.is_some() {
-            self.history_return = None;
-            self.show_modal(Modal::LocalHistory, window, cx);
+        if let Some(target) = self.history_return.take() {
+            self.show_modal(Modal::LocalHistory(target), window, cx);
         } else if self.connection_return {
             self.back_to_connections(window, cx);
         } else {
@@ -857,6 +893,7 @@ impl Workbench {
     /// Send one response to the verified attempt; the secret is never copied to profile data.
     pub(super) fn submit_credentials(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(Modal::Credentials {
+            remember,
             owner,
             secret,
             reply,
@@ -868,7 +905,7 @@ impl Workbench {
         let owner = *owner;
         let value = crate::credentials::CredentialReply {
             secret: zeroize::Zeroizing::new(secret.read(cx).value().to_string()),
-            remember: true,
+            remember: *remember,
         };
         if value.secret.is_empty() {
             return;
@@ -904,12 +941,12 @@ impl Workbench {
     ) {
         self.open_profile_form(profile, reconnect, false, window, cx);
     }
-    /// Build an edit form and load its saved credential off the UI thread when requested.
+    /// Passwords are read only by the verified SSH handshake, never by a metadata form.
     fn open_profile_form(
         &mut self,
         profile: Option<Profile>,
         reconnect: Option<Owner>,
-        load_secret: bool,
+        _load_secret: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -919,13 +956,9 @@ impl Workbench {
             name: String::new(),
             host: String::new(),
             port: 22,
-            username: String::new(),
+            username: "root".into(),
         });
-        let secret_request = Id::new_v4();
-        let secret_loading = existing && load_secret;
-        let secret = Self::input("", "", false, window, cx);
-        let secret_entity = secret.clone();
-        let profile_id = profile.id;
+        let secret = Self::input("", "", true, window, cx);
         let form = ProfileForm {
             id: profile.id,
             name: Self::input(&profile.name, "Production", false, window, cx),
@@ -933,9 +966,7 @@ impl Workbench {
             port: Self::input(&profile.port.to_string(), "22", false, window, cx),
             username: Self::input(&profile.username, "root", false, window, cx),
             secret,
-            secret_request,
-            secret_loading,
-            remember: true,
+            remember: self.prefs.remember_credentials,
             reconnect,
             error: None,
             existing,
@@ -949,63 +980,6 @@ impl Workbench {
         };
         self.show_modal(Modal::Profile(form), window, cx);
         focus.focus(window);
-        if secret_loading {
-            self.load_profile_secret(profile_id, secret_request, secret_entity, window, cx);
-        }
-    }
-    fn profile_form_for_request(&mut self, request: Id) -> Option<&mut ProfileForm> {
-        if let Some(Modal::Profile(form)) = self.modal.as_mut()
-            && form.secret_request == request
-        {
-            return Some(form);
-        }
-        for frame in self.modal_stack.iter_mut().rev() {
-            if let Modal::Profile(form) = &mut frame.modal
-                && form.secret_request == request
-            {
-                return Some(form);
-            }
-        }
-        if let Some(frame) = self.modal_confirm_return.as_mut()
-            && let Modal::Profile(form) = &mut frame.modal
-            && form.secret_request == request
-        {
-            return Some(form);
-        }
-        None
-    }
-
-    /// Load a saved password without blocking layout or replacing user input.
-    fn load_profile_secret(
-        &mut self,
-        profile_id: Id,
-        request: Id,
-        secret: Entity<InputState>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let vault = self.backend.vault.clone();
-        let task = self
-            .backend
-            .runtime
-            .spawn_blocking(move || vault.read(profile_id));
-        cx.spawn_in(window, async move |view, cx| {
-            let result = task.await;
-            let _ = view.update_in(cx, |this, window, cx| {
-                let Some(form) = this.profile_form_for_request(request) else {
-                    return;
-                };
-                form.secret_loading = false;
-                let fill = secret.read(cx).value().is_empty();
-                if fill && let Ok(Ok(Some(value))) = &result {
-                    secret.update(cx, |input, cx| {
-                        input.set_value(value.to_string(), window, cx)
-                    });
-                }
-                cx.notify();
-            });
-        })
-        .detach();
     }
     pub(super) fn submit_profile(
         &mut self,
@@ -1013,6 +987,9 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.modal_commit.busy() {
+            return;
+        }
         let Some(Modal::Profile(form)) = &mut self.modal else {
             return;
         };
@@ -1037,45 +1014,29 @@ impl Workbench {
             cx.notify();
             return;
         }
-        let secret = form.secret.read(cx).value().to_string();
+        let secret = zeroize::Zeroizing::new(if connect {
+            form.secret.read(cx).value().to_string()
+        } else {
+            String::new()
+        });
         let remember = form.remember;
         let reconnect = form.reconnect;
-        if let Some(existing) = self.profiles.iter_mut().find(|p| p.id == profile.id) {
-            *existing = profile.clone();
-        } else {
-            self.profiles.push(profile.clone());
-        }
-        self.backend.save_profiles(self.profiles.clone());
-        self.connection_selected = Some(profile.id);
-        if !connections::matches_query(&profile, &self.connection_search.read(cx).value()) {
-            self.connection_search
-                .update(cx, |input, cx| input.set_value("", window, cx));
-        }
-        if connect {
-            // A credential prompt is the parent of this form when reconnecting.
-            // Cancel its sender before clearing the modal chain so the old
-            // attempt cannot consume the replacement connection's response.
-            if let Some(owner) = reconnect {
-                self.cancel_credential_prompt(owner);
-            }
-            self.dismiss_to_page(window, cx);
-        } else {
-            // Save-only is an ordinary form completion: return to whichever
-            // modal opened the form, preserving that modal instance.
-            self.dismiss(window, cx);
-        }
-        if connect {
-            if let Some(owner) = reconnect {
-                if let Some(pane) = self.pane_mut(owner) {
-                    // Reconnect keeps the live session's terminal encoding.
-                    let encoding = pane.spec.encoding();
-                    pane.spec = SessionSpec::Ssh { profile, encoding };
-                }
-                self.reconnect(owner, secret, remember, window, cx);
-            } else {
-                self.new_ssh(profile, secret, remember, true, window, cx);
-            }
-        }
+        let existing = form.existing && !form.cloning;
+        form.error = None;
+        self.submit_metadata(
+            Mutation::SaveProfile {
+                profile: profile.clone(),
+                existing,
+            },
+            AfterCommit::Profile {
+                profile,
+                connect,
+                reconnect,
+                secret,
+                remember,
+            },
+            cx,
+        );
     }
     pub(super) fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.local_shells = None;
@@ -1199,7 +1160,15 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) {
         self.dismiss_to_page(window, cx);
-        self.new_ssh(profile, String::new(), false, new_instance, window, cx);
+        let _ = new_instance;
+        self.new_ssh(
+            profile,
+            String::new(),
+            self.prefs.remember_credentials,
+            true,
+            window,
+            cx,
+        );
     }
     pub(super) fn request_close(
         &mut self,
@@ -1420,6 +1389,12 @@ impl Workbench {
         }
     }
     pub(super) fn import_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.modal_commit.busy() || self.import_request.is_some() {
+            return;
+        }
+        let request = Id::new_v4();
+        self.import_request = Some(request);
+        let owner = self.active_owner();
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -1428,37 +1403,38 @@ impl Workbench {
         });
         let profiles = self.profiles.clone();
         let runtime = self.backend.runtime.clone();
-        cx.spawn_in(window, async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = paths.await {
-                if let Some(path) = paths.first().cloned() {
-                    let task = runtime.spawn_blocking(move || {
-                        if std::fs::metadata(&path)?.len() > 8_000_000 {
-                            anyhow::bail!("Connection import exceeds the 8 MB limit");
-                        }
-                        let text = std::fs::read_to_string(&path)?;
-                        let text = text
-                            .strip_prefix('\u{feff}')
-                            .map(str::to_string)
-                            .unwrap_or(text);
-                        connections::preview(&text, &profiles)
-                    });
-                    let result = task.await;
-                    let _ = this.update_in(cx, |this, window, cx| match result {
-                        Ok(Ok(preview)) => this.show_modal(
-                            Modal::Import {
-                                preview,
-                                replace: false,
-                            },
-                            window,
-                            cx,
-                        ),
-                        other => {
-                            this.notice = Some(format!("{other:?}"));
-                            cx.notify();
-                        }
-                    });
+        cx.spawn_in(window, async move |view, cx| {
+            let result = match paths.await {
+                Ok(Ok(Some(paths))) if !paths.is_empty() => {
+                    let path = paths[0].clone();
+                    Some(
+                        runtime
+                            .spawn_blocking(move || connections::preview_file(&path, &profiles))
+                            .await,
+                    )
                 }
-            }
+                _ => None,
+            };
+            let _ = view.update_in(cx, |this, window, cx| {
+                if this.import_request != Some(request) || this.active_owner() != owner {
+                    return;
+                }
+                this.import_request = None;
+                match result {
+                    Some(Ok(Ok(preview))) => this.show_modal(
+                        Modal::Import {
+                            preview,
+                            replace: false,
+                        },
+                        window,
+                        cx,
+                    ),
+                    Some(Ok(Err(error))) => this.notice = Some(error.to_string()),
+                    Some(Err(_)) => this.notice = Some(this.t("import_failed").into()),
+                    None => {}
+                }
+                cx.notify();
+            });
         })
         .detach();
     }
@@ -1481,18 +1457,7 @@ impl Workbench {
             if let Ok(Ok(Some(path))) = path.await {
                 let result = runtime
                     .spawn_blocking(move || {
-                        // Decrypt stored passwords off the UI thread for the export file.
-                        let mut secrets = std::collections::HashMap::new();
-                        for profile in &profiles {
-                            if let Ok(Some(secret)) = vault.read(profile.id) {
-                                secrets.insert(profile.id, secret.to_string());
-                            }
-                        }
-                        let text = connections::export(&profiles, &secrets)?;
-                        // UTF-8 BOM so spreadsheet apps decode Chinese text correctly.
-                        let bytes =
-                            crate::encoding::encode(&text, crate::encoding::Encoding::Utf8, true)?;
-                        std::fs::write(&path, bytes)?;
+                        connections::export_file(&path, &profiles, vault.as_ref())?;
                         Ok::<_, anyhow::Error>(path)
                     })
                     .await;
@@ -1531,12 +1496,12 @@ impl Workbench {
             id,
             label,
             self.prefs.ui_size,
-            theme::Palette::new(self.prefs.theme),
+            theme::Palette::new(self.prefs.effective_theme()),
         )
     }
     /// Paint a determinate transfer ring inside the fixed 24px status slot.
     pub(super) fn transfer_progress_ring(&self, fraction: f32) -> AnyElement {
-        let palette = theme::Palette::new(self.prefs.theme);
+        let palette = theme::Palette::new(self.prefs.effective_theme());
         canvas(
             |_, _, _| {},
             move |bounds, _, window, _| {
@@ -1634,6 +1599,7 @@ impl Workbench {
                 view.update(_cx, |this, _| {
                     if let Some(qa) = &mut this.qa {
                         qa.dialog_frame_bounds = Some(_bounds);
+                        qa.dialog_revision += 1;
                     }
                 });
             },
@@ -1667,7 +1633,7 @@ impl Workbench {
         let Some(modal) = &self.modal else {
             return div().into_any_element();
         };
-        let p = theme::Palette::new(self.prefs.theme);
+        let p = theme::Palette::new(self.prefs.effective_theme());
         let mut title = self.t("settings").to_string();
         let resource_dialog = matches!(
             modal,
@@ -1675,25 +1641,18 @@ impl Workbench {
         );
         let compact_dialog =
             resource_dialog || matches!(modal, Modal::Connections | Modal::Profile(_));
-        let history_modal = matches!(modal, Modal::LocalHistory);
+        let history_modal = matches!(modal, Modal::LocalHistory(_));
         #[cfg(debug_assertions)]
         let measure_frame = self.qa.is_some();
         #[cfg(not(debug_assertions))]
         let measure_frame = false;
-        let width_cap = if matches!(modal, Modal::Editor { .. }) {
-            960.
-        } else if modal.is_confirmation() {
-            480.
-        } else {
-            640.
-        };
         // These dialogs act directly and always offer the header close button.
         let closable_dialog = matches!(
             modal,
             Modal::About
                 | Modal::Encoding { .. }
                 | Modal::Transfer { .. }
-                | Modal::LocalHistory
+                | Modal::LocalHistory(_)
                 | Modal::SystemTools { .. }
                 | Modal::ProcessDetails { .. }
                 | Modal::Editor { .. }
@@ -1712,6 +1671,11 @@ impl Workbench {
             // list instead of retaining the list's full min-content height.
             .when(history_modal, |body| body.min_h_0())
             .gap(px(theme::SPACE_PANEL));
+        if let Some(error) = &self.modal_commit.error {
+            body = body.child(div().text_color(p.error).child(error.clone()));
+        } else if self.modal_commit.busy() {
+            body = body.child(div().text_color(p.muted).child(self.t("saving_metadata")));
+        }
         let mut footer = div()
             .flex()
             .flex_wrap()
@@ -1732,7 +1696,7 @@ impl Workbench {
                     .child(
                         gpui::svg()
                             .path("mantash-mark.svg")
-                            .size(px(72.))
+                            .size(px(36.))
                             .text_color(p.accent),
                     )
                     .child(div().text_size(px(18.)).child("MantaSH"))
@@ -1810,8 +1774,7 @@ impl Workbench {
                                 ),
                         ),
                     );
-                // No remember toggle: submitted passwords are always stored
-                // (submit_credentials replies with remember=true unconditionally).
+                // This attempt retains the credential policy captured before connecting.
                 footer = footer.child(
                     self.button("edit-credential-connection", self.t("edit"))
                         .on_click(
@@ -1820,7 +1783,7 @@ impl Workbench {
                 );
                 footer = footer.child(
                     self.button("submit-credentials", self.t("connect"))
-                        .primary()
+                        .success()
                         .disabled(secret.read(cx).value().is_empty())
                         .on_click(cx.listener(|this, _, w, cx| this.submit_credentials(w, cx))),
                 );
@@ -1829,45 +1792,40 @@ impl Workbench {
                 title = self.t("connection_library").into();
                 body = body.child(self.render_connection_library(window, cx));
             }
-            Modal::LocalHistory => {
+            Modal::LocalHistory(target) => {
+                let target = *target;
+                let scope = target.scope;
                 title = self.t("history").into();
-                if let Some(pane) = self.active_pane() {
-                    let owner = pane.owner;
-                    let scope = pane.spec.history_scope();
-                    let snapshot = self.history_delete_snapshot(owner, scope, cx);
-                    if !snapshot.target_ids.is_empty() {
-                        let delete_snapshot = snapshot.clone();
-                        footer = footer
-                            .justify_start()
-                            .child(
-                                self.button(
-                                    "delete-history",
-                                    format!("{} ({})", self.t("delete"), snapshot.target_ids.len()),
-                                )
-                                .svg_icon("icons/trash-2.svg")
-                                .danger()
-                                .on_click(cx.listener(
-                                    move |this, _, window, cx| {
-                                        this.review_history_delete(
-                                            delete_snapshot.clone(),
-                                            window,
-                                            cx,
-                                        )
-                                    },
-                                )),
+                let snapshot = self.history_delete_snapshot(target, cx);
+                if !snapshot.target_ids.is_empty() {
+                    let delete_snapshot = snapshot.clone();
+                    footer = footer
+                        .justify_start()
+                        .child(
+                            self.button(
+                                "delete-history",
+                                format!("{} ({})", self.t("delete"), snapshot.target_ids.len()),
                             )
-                            .child(
-                                self.button("clear-history-selection", self.t("clear_selection"))
-                                    .icon(IconName::Undo)
-                                    .ghost()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.history_views[scope.index()].clear_selection();
-                                        cx.notify();
-                                    })),
-                            );
-                    } else {
-                        footer_hidden = true;
-                    }
+                            .svg_icon("icons/trash-2.svg")
+                            .danger()
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    this.review_history_delete(delete_snapshot.clone(), window, cx)
+                                },
+                            )),
+                        )
+                        .child(
+                            self.button("clear-history-selection", self.t("clear_selection"))
+                                .icon(IconName::Undo)
+                                .ghost()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if this.history_target() != Some(target) {
+                                        return;
+                                    }
+                                    this.history_views[scope.index()].clear_selection();
+                                    cx.notify();
+                                })),
+                        );
                 } else {
                     footer_hidden = true;
                 }
@@ -1878,7 +1836,7 @@ impl Workbench {
                         .flex()
                         .flex_col()
                         .overflow_hidden()
-                        .child(self.render_history(cx)),
+                        .child(self.render_history(target, cx)),
                 );
             }
             Modal::Profile(form) => {
@@ -1896,13 +1854,7 @@ impl Workbench {
                     })
                     .into();
                 body = body
-                    // Name stands alone; host/port and username/password share rows.
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(self.field(self.t("optional_name"), &form.name)),
-                    )
+                    .child(self.field(self.t("name"), &form.name))
                     .child(
                         div()
                             .flex()
@@ -1915,7 +1867,8 @@ impl Workbench {
                             )
                             .child(
                                 div()
-                                    .w(px(80.))
+                                    .w(px(104.))
+                                    .flex_none()
                                     .child(self.field(self.t("port"), &form.port)),
                             ),
                     )
@@ -1941,9 +1894,17 @@ impl Workbench {
                     });
                 footer = footer
                     .child(
-                        self.button("save-only", self.t("save")).on_click(
-                            cx.listener(|this, _, w, cx| this.submit_profile(false, w, cx)),
-                        ),
+                        self.button("dismiss-modal", self.t("cancel"))
+                            .ghost()
+                            .on_click(cx.listener(|this, _, w, cx| this.cancel_modal(w, cx))),
+                    )
+                    .child(
+                        self.button("save-only", self.t("save"))
+                            .success()
+                            .disabled(self.modal_commit.busy())
+                            .on_click(
+                                cx.listener(|this, _, w, cx| this.submit_profile(false, w, cx)),
+                            ),
                     )
                     .child(
                         self.button(
@@ -1954,218 +1915,33 @@ impl Workbench {
                                 "save_connect"
                             }),
                         )
-                        .primary()
+                        .success()
+                        .disabled(self.modal_commit.busy())
                         .on_click(cx.listener(|this, _, w, cx| this.submit_profile(true, w, cx))),
-                    )
-                    // Cancel/close always sits at the far right of a footer.
-                    .child(
-                        self.button("dismiss-modal", self.t("cancel"))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, w, cx| this.cancel_modal(w, cx))),
                     );
             }
             Modal::Settings => {
-                // The footer carries only the reset-defaults action; closing
-                // stays on the header X.
-                // Section label for the language switcher; the old vault
-                // heading was a leftover from the removed password section.
-                let language = div()
-                    .flex()
-                    .items_center()
+                body = body.child(self.render_settings(cx));
+                footer = footer
                     .justify_between()
-                    .gap(px(12.))
-                    .child(self.t("language"));
-                body = body
-                    .child(language)
-                    .child(div().flex().gap(px(8.)).children(
-                        [(Language::Zh, "中文"), (Language::En, "English")].map(
-                            |(language, label)| {
-                                self.button(label, label)
-                                    .selected(self.prefs.language == language)
-                                    .on_click(cx.listener(move |this, _, w, cx| {
-                                        this.prefs.language = language;
-                                        this.apply_preferences(w, cx);
-                                    }))
-                            },
+                    .items_center()
+                    .child(
+                        self.button("reset-settings", self.t("reset_defaults"))
+                            .warning()
+                            .on_click(cx.listener(|this, _, w, cx| this.reset_settings(w, cx))),
+                    )
+                    .child(
+                        self.button(
+                            "settings-about",
+                            self.t("settings_version")
+                                .replace("{version}", crate::APP_VERSION),
+                        )
+                        .ghost()
+                        .tooltip(self.t("about_mantash"))
+                        .on_click(
+                            cx.listener(|this, _, w, cx| this.show_modal(Modal::About, w, cx)),
                         ),
-                    ));
-                let shell_choices = self.local_shells.clone().unwrap_or_default();
-                let shell_picker = if self.local_shells_loading {
-                    div()
-                        .text_color(p.muted)
-                        .child(self.t("loading"))
-                        .into_any_element()
-                } else if shell_choices.is_empty() {
-                    div()
-                        .text_color(p.error)
-                        .child(self.t("local_shell_unavailable"))
-                        .into_any_element()
-                } else {
-                    let current = self.prefs.local_shell.clone();
-                    let label = current
-                        .rsplit(['/', '\\'])
-                        .next()
-                        .unwrap_or(&current)
-                        .to_string();
-                    let view = cx.entity().downgrade();
-                    self.button("local-shell-selector", label)
-                        .tooltip(current.clone())
-                        .dropdown_menu(move |mut menu, _, _| {
-                            for shell in &shell_choices {
-                                // Windows accepts both separators, including paths saved by older versions.
-                                let selected =
-                                    std::path::Path::new(shell) == std::path::Path::new(&current);
-                                let shell = shell.clone();
-                                let view = view.clone();
-                                menu = menu.item(
-                                    PopupMenuItem::new(shell.clone())
-                                        .checked(selected)
-                                        .on_click(move |_, window, cx| {
-                                            let _ = view.update(cx, |this, cx| {
-                                                if matches!(this.modal, Some(Modal::Settings))
-                                                    && this.local_shells.as_ref().is_some_and(
-                                                        |choices| choices.contains(&shell),
-                                                    )
-                                                {
-                                                    this.prefs.local_shell = shell.clone();
-                                                    this.apply_preferences(window, cx);
-                                                }
-                                            });
-                                        }),
-                                );
-                            }
-                            menu
-                        })
-                        .into_any_element()
-                };
-                body = body.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_start()
-                        .gap(px(theme::SPACE_SMALL))
-                        .child(self.t("local_shell"))
-                        .child(shell_picker),
-                );
-                for terminal in [false, true] {
-                    let family = if terminal {
-                        &self.prefs.terminal_font
-                    } else {
-                        &self.prefs.ui_font
-                    };
-                    let size = if terminal {
-                        self.prefs.terminal_size
-                    } else {
-                        self.prefs.ui_size
-                    };
-                    body = body.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(8.))
-                            .child(self.t(if terminal { "terminal_font" } else { "ui_font" }))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.))
-                                    .child(
-                                        self.button(
-                                            if terminal {
-                                                "terminal-family"
-                                            } else {
-                                                "ui-family"
-                                            },
-                                            if family.starts_with('.') {
-                                                self.t("system_font").to_string()
-                                            } else {
-                                                family.clone()
-                                            },
-                                        )
-                                        .on_click(
-                                            cx.listener(move |this, _, w, cx| {
-                                                let filter = Self::input(
-                                                    "",
-                                                    this.t("font_search"),
-                                                    false,
-                                                    w,
-                                                    cx,
-                                                );
-                                                this.show_modal(
-                                                    Modal::Font { terminal, filter },
-                                                    w,
-                                                    cx,
-                                                );
-                                            }),
-                                        ),
-                                    )
-                                    .child(
-                                        self.button(
-                                            if terminal {
-                                                "terminal-minus"
-                                            } else {
-                                                "ui-minus"
-                                            },
-                                            "−",
-                                        )
-                                        .on_click(
-                                            cx.listener(move |this, _, w, cx| {
-                                                if terminal {
-                                                    this.prefs.terminal_size -= 1.;
-                                                } else {
-                                                    this.prefs.ui_size -= 1.;
-                                                }
-                                                this.apply_preferences(w, cx);
-                                            }),
-                                        ),
-                                    )
-                                    // Same height as the stepper buttons so the
-                                    // value sits level with them, not on its own
-                                    // padded line.
-                                    .child(
-                                        div()
-                                            .h(px(24.))
-                                            .w(px(52.))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .child(format!("{size:.0} px")),
-                                    )
-                                    .child(
-                                        self.button(
-                                            if terminal { "terminal-plus" } else { "ui-plus" },
-                                            "+",
-                                        )
-                                        .on_click(
-                                            cx.listener(move |this, _, w, cx| {
-                                                if terminal {
-                                                    this.prefs.terminal_size += 1.;
-                                                } else {
-                                                    this.prefs.ui_size += 1.;
-                                                }
-                                                this.apply_preferences(w, cx);
-                                            }),
-                                        ),
-                                    ),
-                            ),
                     );
-                }
-                footer = footer.child(
-                    self.button("reset-settings", self.t("reset_defaults"))
-                        .on_click(cx.listener(|this, _, w, cx| {
-                            // Reset exactly the items this dialog shows:
-                            // language and the two font/size pairs. Theme
-                            // lives on the top bar and hidden preferences
-                            // (window geometry, tool widths) keep their values.
-                            let defaults = Preferences::default();
-                            this.prefs.language = defaults.language;
-                            this.prefs.ui_font = defaults.ui_font;
-                            this.prefs.ui_size = defaults.ui_size;
-                            this.prefs.terminal_font = defaults.terminal_font;
-                            this.prefs.terminal_size = defaults.terminal_size;
-                            this.apply_preferences(w, cx);
-                        })),
-                );
             }
             Modal::Font { terminal, filter } => {
                 title = self
@@ -2298,29 +2074,18 @@ impl Workbench {
                 footer = footer.child(
                     self.button("confirm-delete-profiles", self.t("delete"))
                         .danger()
-                        .on_click(cx.listener(move |this, _, w, cx| {
-                            // Remove the confirmed UUIDs, persist the new list, and drop
-                            // their stored credentials in the background.
-                            this.profiles.retain(|profile| !ids.contains(&profile.id));
-                            this.backend.save_profiles(this.profiles.clone());
-                            let events = this.backend.events.clone();
-                            let vault = this.backend.vault.clone();
-                            let forgotten = ids.clone();
-                            this.backend.runtime.spawn_blocking(move || {
-                                for id in &forgotten {
-                                    if let Err(error) = vault.forget(*id) {
-                                        let _ = events.try_send(Event::Error(error.to_string()));
-                                    }
-                                }
-                            });
-                            this.connection_multi.clear();
-                            this.connection_selected = None;
-                            this.connection_anchor = None;
-                            if this.connection_return {
-                                this.back_to_connections(w, cx);
-                            } else {
-                                this.dismiss(w, cx);
+                        .disabled(self.modal_commit.busy() || self.modal_commit.committed)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if !matches!(this.modal, Some(Modal::DeleteProfiles { .. }))
+                                || this.modal_commit.committed
+                            {
+                                return;
                             }
+                            this.submit_metadata(
+                                Mutation::DeleteProfiles(ids.clone()),
+                                AfterCommit::Return,
+                                cx,
+                            );
                         })),
                 );
             }
@@ -2358,6 +2123,7 @@ impl Workbench {
                 footer = footer
                     .child(
                         self.button("reject-host", self.t("reject"))
+                            .warning()
                             .on_click(cx.listener(move |this, _, w, cx| {
                                 this.backend.close(owner);
                                 this.dismiss(w, cx);
@@ -2438,43 +2204,22 @@ impl Workbench {
                             })),
                     )
                     .child(
-                        self.button("confirm-import", self.t("import"))
-                            .primary()
-                            .on_click(cx.listener(|this, _, w, cx| {
-                                if let Some(Modal::Import { preview, replace }) = &this.modal {
-                                    this.profiles =
-                                        connections::merge(&this.profiles, preview, *replace);
-                                    this.backend.save_profiles(this.profiles.clone());
-                                    // Passwords from the file go into the vault for rows that
-                                    // actually landed; skipped duplicates keep their saved value.
-                                    let imported: Vec<(Id, String)> = preview
-                                        .rows
-                                        .iter()
-                                        .filter(|row| row.duplicate.is_none() || *replace)
-                                        .filter_map(|row| {
-                                            let password = row.password.clone()?;
-                                            let profile = row.profile.as_ref()?;
-                                            let id = this
-                                                .profiles
-                                                .iter()
-                                                .find(|saved| saved.duplicates(profile))?
-                                                .id;
-                                            Some((id, password))
-                                        })
-                                        .collect();
-                                    if !imported.is_empty() {
-                                        let vault = this.backend.vault.clone();
-                                        this.backend.runtime.spawn_blocking(move || {
-                                            for (id, secret) in &imported {
-                                                let _ = crate::credentials::SecretStore::write(
-                                                    &*vault, *id, secret,
-                                                );
-                                            }
-                                        });
-                                    }
-                                }
-                                this.dismiss(w, cx);
-                            })),
+                        self.button(
+                            "confirm-import",
+                            self.t(if self.modal_commit.failed.is_empty() {
+                                "import"
+                            } else {
+                                "retry_passwords"
+                            }),
+                        )
+                        .primary()
+                        .disabled(
+                            self.modal_commit.busy()
+                                || (self.modal_commit.committed
+                                    && self.modal_commit.failed.is_empty())
+                                || !preview.rows.iter().any(|row| row.profile.is_some()),
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.submit_import(cx))),
                     );
             }
             Modal::FileName {
@@ -2482,6 +2227,7 @@ impl Workbench {
                 directory,
                 original,
                 input,
+                ..
             } => {
                 title = self
                     .t(if original.is_some() {
@@ -2491,52 +2237,26 @@ impl Workbench {
                     })
                     .into();
                 body = body.child(directory.clone()).child(self.input_box(input));
-                let owner = *owner;
                 footer = footer.child(
                     self.button("confirm-name", self.t("apply"))
                         .primary()
-                        .on_click(cx.listener(move |this, _, w, cx| {
-                            if let Some(Modal::FileName {
-                                directory,
-                                original,
-                                input,
-                                ..
-                            }) = &this.modal
-                            {
-                                match crate::files::join(directory, &input.read(cx).value()) {
-                                    Ok(path) => {
-                                        let operation = original.as_ref().map_or_else(
-                                            || FileOperation::Mkdir(path.clone()),
-                                            |old| FileOperation::Rename(old.clone(), path.clone()),
-                                        );
-                                        this.backend.file_operation(owner, Id::new_v4(), operation);
-                                        this.dismiss(w, cx);
-                                    }
-                                    Err(error) => {
-                                        this.notice = Some(error.to_string());
-                                        cx.notify();
-                                    }
-                                }
-                            }
-                        })),
+                        .disabled(self.modal_commit.busy() || self.modal_commit.committed)
+                        .on_click(cx.listener(|this, _, _, cx| this.confirm_file_operation(cx))),
                 );
             }
-            Modal::DeleteFiles { owner, paths } => {
+            Modal::DeleteFiles {
+                owner,
+                paths,
+                origin,
+            } => {
                 title = self.t("delete_confirm").into();
                 body = body.children(paths.iter().cloned().map(|path| div().child(path)));
-                let owner = *owner;
-                let paths = paths.clone();
+                body = body.child(self.t("delete_files_impact"));
                 footer = footer.child(
                     self.button("confirm-delete-files", self.t("delete"))
                         .danger()
-                        .on_click(cx.listener(move |this, _, w, cx| {
-                            this.backend.file_operation(
-                                owner,
-                                Id::new_v4(),
-                                FileOperation::Delete(paths.clone()),
-                            );
-                            this.dismiss(w, cx);
-                        })),
+                        .disabled(self.modal_commit.busy() || self.modal_commit.committed)
+                        .on_click(cx.listener(|this, _, _, cx| this.confirm_file_operation(cx))),
                 );
             }
             Modal::DeleteHistory {
@@ -2546,17 +2266,20 @@ impl Workbench {
                 ids,
             } => {
                 title = self.t("delete_history_confirm").into();
-                body = body.child(label.clone()).child(format!(
-                    "{} {}",
-                    ids.len(),
-                    self.t("selected")
-                ));
+                body = body.children(
+                    self.history
+                        .list(*scope)
+                        .filter(|entry| ids.contains(&entry.id))
+                        .map(|entry| div().child(entry.command.clone())),
+                );
+                let _ = label;
                 let owner = *owner;
                 let scope = *scope;
                 let ids = ids.clone();
                 footer = footer.child(
                     self.button("confirm-history-delete", self.t("delete"))
                         .danger()
+                        .disabled(self.modal_commit.busy() || self.modal_commit.committed)
                         .on_click(cx.listener(move |this, _, w, cx| {
                             let context_valid = this.modal.as_ref().is_some_and(|modal| {
                                 matches!(
@@ -2583,22 +2306,21 @@ impl Workbench {
                             // records added after it was created are excluded.
                             let ids = this
                                 .history
-                                .iter()
-                                .filter(|entry| {
-                                    scope.includes(&entry.scope) && ids.contains(&entry.id)
-                                })
+                                .list(scope)
+                                .filter(|entry| ids.contains(&entry.id))
                                 .map(|entry| entry.id)
                                 .collect::<Vec<_>>();
                             if ids.is_empty() {
                                 this.cancel_modal(w, cx);
                                 return;
                             }
-                            this.backend.delete_history(ids.clone());
-                            this.history.retain(|entry| {
-                                !(scope.includes(&entry.scope) && ids.contains(&entry.id))
-                            });
-                            this.history_views[scope.index()].clear_selection();
-                            this.cancel_modal(w, cx);
+                            if !this.modal_commit.committed {
+                                this.submit_metadata(
+                                    Mutation::DeleteHistory(ids),
+                                    AfterCommit::Return,
+                                    cx,
+                                );
+                            }
                         })),
                 );
             }
@@ -2665,6 +2387,7 @@ impl Workbench {
                 footer = footer
                     .child(
                         self.button("save-close", self.t("save_all_close"))
+                            .success()
                             .on_click(cx.listener(move |this, _, w, cx| {
                                 this.save_before_close(target_save.clone(), w, cx)
                             })),
@@ -2692,6 +2415,7 @@ impl Workbench {
                 footer = footer
                     .child(
                         self.button("reload-document", self.t("reload"))
+                            .warning()
                             .on_click(cx.listener(move |this, _, w, cx| {
                                 this.reload_document(owner, id, cx);
                                 this.dismiss(w, cx);
@@ -2952,6 +2676,7 @@ impl Workbench {
                                         self.t("retry"),
                                     )
                                     .ghost()
+                                    .primary()
                                     .on_click(cx.listener(
                                         move |this, _, w, cx| {
                                             this.retry_transfer(retry_record.clone(), w, cx)
@@ -3034,7 +2759,7 @@ impl Workbench {
                             )
                             .child(
                                 self.button("transfer-stop", self.t("stop_pending"))
-                                    .danger()
+                                    .warning()
                                     .on_click(cx.listener(move |this, _, w, cx| {
                                         this.review_stop_transfers(
                                             current_owner,
@@ -3099,7 +2824,7 @@ impl Workbench {
                     )
                     .child(
                         self.button("stop-transfers", self.t("stop_pending"))
-                            .danger()
+                            .warning()
                             .disabled(!stop_ids.iter().any(|id| {
                                 self.transfers
                                     .iter()
@@ -3132,7 +2857,6 @@ impl Workbench {
                 let directory = *directory;
                 footer = footer.child(
                     self.button("follow-link", self.t("open"))
-                        .primary()
                         .disabled(
                             !self
                                 .pane(owner)
@@ -3490,9 +3214,14 @@ impl Workbench {
                 let disabled = unavailable_key.is_some() || !self.can_signal(owner, &process);
                 let tooltip = self.t(unavailable_key.unwrap_or("end_process"));
                 footer = footer
-                    .child(div().flex_1())
+                    .items_center()
+                    .child(
+                        self.button("dismiss-modal", self.t("cancel"))
+                            .on_click(cx.listener(|this, _, w, cx| this.cancel_modal(w, cx))),
+                    )
                     .child(
                         self.button("end-process", self.t("end_process"))
+                            .warning()
                             .disabled(disabled)
                             .tooltip(tooltip)
                             .on_click(cx.listener({
@@ -3571,7 +3300,7 @@ impl Workbench {
                         self.t(if force { "force_end" } else { "end_process" }),
                     )
                     .when(force, |button| button.danger())
-                    .when(!force, |button| button.primary())
+                    .when(!force, |button| button.warning())
                     .disabled(reason.is_some() || !self.can_signal(owner, &process))
                     .tooltip(self.t(reason.unwrap_or(if force {
                         "force_end"
@@ -3624,7 +3353,9 @@ impl Workbench {
                 if has_document {
                     footer = self.editor_footer(*owner, cx);
                 }
-                body = body.child(self.render_editor(*owner, cx));
+                body = body
+                    .child(self.editor_toolbar(*owner, cx))
+                    .child(self.render_editor(*owner, cx));
             }
             Modal::Transfers { owner } => {
                 title = self.t("transfer").into();
@@ -3666,16 +3397,7 @@ impl Workbench {
         }
         // The editor's header carries the active document's full path beside
         // the title; other dialogs show their plain title only.
-        let editor_path = match modal {
-            Modal::Editor { owner } => self
-                .pane(*owner)
-                .and_then(|pane| {
-                    pane.active_document
-                        .and_then(|id| pane.documents.iter().find(|d| d.id == id))
-                })
-                .map(|doc| doc.original.path.clone()),
-            _ => None,
-        };
+        let editor_path: Option<String> = None;
         let close_label = self.t(
             if matches!(
                 modal,
@@ -3697,18 +3419,32 @@ impl Workbench {
             modal,
             Modal::Profile(_)
                 | Modal::Editor { .. }
+                | Modal::ProcessDetails { .. }
                 | Modal::Settings
-                | Modal::LocalHistory
+                | Modal::LocalHistory(_)
                 | Modal::Transfers { .. }
                 | Modal::Transfer { .. }
                 | Modal::CancelTransfers { .. }
                 | Modal::Update
                 | Modal::About
         ) {
-            footer = footer.child(
-                self.button("dismiss-modal", close_label)
-                    .on_click(cx.listener(|this, _, w, cx| this.cancel_modal(w, cx))),
-            );
+            if close_label != self.t("close") && !footer_hidden {
+                footer = div()
+                    .flex()
+                    .flex_wrap()
+                    .justify_end()
+                    .items_center()
+                    .gap(px(theme::SPACE_CONTROL))
+                    .child(
+                        self.button("dismiss-modal", close_label)
+                            .when(
+                                matches!(modal, Modal::Credentials { .. } | Modal::Trust { .. }),
+                                |button| button.warning(),
+                            )
+                            .on_click(cx.listener(|this, _, w, cx| this.cancel_modal(w, cx))),
+                    )
+                    .child(footer);
+            }
         }
         // GPUI can expand an auto-height flex dialog to its max-height. Measure the natural
         // footer and scroll content instead, so short resource dialogs hug their content.
@@ -3845,54 +3581,8 @@ impl Workbench {
                             }
                         }),
                     )
-                    .w(px(if matches!(modal, Modal::Connections) {
-                        640.
-                    } else if matches!(modal, Modal::Editor { .. }) {
-                        960.
-                    } else if matches!(modal, Modal::LocalHistory) {
-                        // The history list uses the same 640px content width as the
-                        // connection library while keeping its footer controls compact.
-                        640.
-                    } else if matches!(
-                        modal,
-                        Modal::SystemTools { .. }
-                            | Modal::ProcessDetails { .. }
-                            | Modal::Transfers { .. }
-                    ) {
-                        640.
-                    } else if matches!(modal, Modal::Profile(_)) {
-                        // The connection form needs room for host/port and
-                        // username/password pairs at the normal form width.
-                        560.
-                    } else if matches!(modal, Modal::FileName { .. }) {
-                        // The rename/new-directory prompt is one path line and
-                        // a single input; 320px fits without waste.
-                        320.
-                    } else if matches!(modal, Modal::Credentials { .. }) {
-                        // The password prompt is one input, a checkbox and two
-                        // buttons; 360px is all it needs.
-                        360.
-                    } else if matches!(
-                        modal,
-                        Modal::Close(CloseTarget::Document(_, _) | CloseTarget::Editor(_))
-                    ) {
-                        // The unsaved-draft confirmation is one path per row and
-                        // three footer buttons; the generic 560 bucket wastes
-                        // width on it.
-                        440.
-                    } else if resource_dialog {
-                        // CPU/disk detail dialogs: meter rows and mount names
-                        // fit comfortably at 480px.
-                        480.
-                    } else if transfer_modal {
-                        480.
-                    } else if closable_dialog {
-                        320.
-                    } else {
-                        560.
-                    })
-                    .min(window.viewport_size().width - px(32.))
-                    .min(px(width_cap)))
+                    .w(px(modal.preferred_width(self.prefs.ui_size))
+                        .min(window.viewport_size().width - px(2. * theme::SPACE_SECTION)))
                     .max_h(window.viewport_size().height - px(48.))
                     .when(history_modal, |dialog| {
                         dialog.max_h(px(600.).min(window.viewport_size().height - px(48.)))

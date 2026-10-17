@@ -1,17 +1,19 @@
-//! Versioned connection import/export with preview before mutation.
-use crate::model::{Id, Profile};
+//! Five-column connection CSV with bounded previews and explicit credential import.
+use crate::{
+    credentials::SecretStore,
+    model::{Id, Profile},
+    storage::Database,
+};
 use anyhow::{Result, bail, ensure};
-use serde::Deserialize;
+use std::{collections::HashMap, io::Read, path::Path};
+use zeroize::{Zeroize, Zeroizing};
 
-/// Search public connection metadata by whitespace-separated terms, including endpoint and port.
 pub fn matches_query(profile: &Profile, query: &str) -> bool {
     let text = format!("{} {}", profile.name, profile.endpoint()).to_lowercase();
     query
         .split_whitespace()
         .all(|term| text.contains(&term.to_lowercase()))
 }
-
-/// Clone public metadata into an unsaved identity; the new UUID cannot read the source credential.
 pub fn clone_profile(profile: &Profile, name: String) -> Profile {
     Profile {
         id: Id::new_v4(),
@@ -20,152 +22,220 @@ pub fn clone_profile(profile: &Profile, name: String) -> Profile {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ImportRow {
     pub row: usize,
     pub profile: Option<Profile>,
-    /// Password supplied by the import file; kept beside the row, never inside Profile.
     pub password: Option<String>,
     pub duplicate: Option<Id>,
     pub error: Option<String>,
+}
+impl std::fmt::Debug for ImportRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImportRow")
+            .field("row", &self.row)
+            .field("profile", &self.profile)
+            .field("has_password", &self.password.is_some())
+            .field("duplicate", &self.duplicate)
+            .field("error", &self.error)
+            .finish()
+    }
+}
+impl Drop for ImportRow {
+    fn drop(&mut self) {
+        if let Some(password) = &mut self.password {
+            password.zeroize();
+        }
+    }
 }
 #[derive(Debug, Clone)]
 pub struct ImportPreview {
     pub rows: Vec<ImportRow>,
 }
 
-/// Parse CSV records independently so a malformed row cannot erase valid data.
-/// A `password` field is captured per row for explicit vault import and never
-/// becomes part of Profile.
+/// Only regular UTF-8 files are accepted; the read stays bounded if a file grows after stat.
+pub fn preview_file(path: &Path, existing: &[Profile]) -> Result<ImportPreview> {
+    let file = std::fs::File::open(path)?;
+    ensure!(
+        file.metadata()?.is_file(),
+        "Connection import requires a regular file"
+    );
+    let mut bytes = Zeroizing::new(Vec::new());
+    file.take(8_000_001).read_to_end(&mut bytes)?;
+    ensure!(
+        bytes.len() <= 8_000_000,
+        "Connection import exceeds the 8 MB limit"
+    );
+    let text =
+        std::str::from_utf8(&bytes).map_err(|_| anyhow::anyhow!("Connection CSV must be UTF-8"))?;
+    preview(text, existing)
+}
+
+/// Diagnostics never include a header, cell value or parser error that may contain a password.
 pub fn preview(text: &str, existing: &[Profile]) -> Result<ImportPreview> {
-    if text.len() > 8_000_000 {
-        bail!("Connection import exceeds the 8 MB limit");
-    }
-    #[derive(Deserialize)]
-    struct CsvRow {
-        name: String,
-        host: String,
-        #[serde(default = "default_port")]
-        port: u16,
-        username: String,
-        #[serde(default)]
-        password: String,
-    }
-    fn default_port() -> u16 {
-        22
-    }
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    ensure!(
+        text.len() <= 8_000_000,
+        "Connection import exceeds the 8 MB limit"
+    );
     let mut reader = csv::ReaderBuilder::new()
-        .trim(csv::Trim::All)
-        .from_reader(text.as_bytes());
-    // One format only: the header must contain exactly five unique native columns.
-    let header = reader.headers()?.clone();
+        .flexible(true)
+        .from_reader(text.strip_prefix('\u{feff}').unwrap_or(text).as_bytes());
+    let header = reader
+        .headers()
+        .map_err(|_| anyhow::anyhow!("Invalid connection CSV header"))?
+        .clone();
     let expected = ["name", "host", "port", "username", "password"];
     ensure!(
-        header.len() == expected.len(),
-        "Connection CSV must contain exactly the five name, host, port, username and password columns"
+        header.len() == 5,
+        "Connection CSV requires exactly name, host, port, username, password"
     );
-    let mut present = [false; 5];
-    let mut normalized_header = csv::StringRecord::new();
-    for column in &header {
+    let mut indices = [usize::MAX; 5];
+    for (position, column) in header.iter().enumerate() {
         let Some(index) = expected
             .iter()
-            .position(|candidate| candidate.eq_ignore_ascii_case(column))
+            .position(|name| name.eq_ignore_ascii_case(column.trim()))
         else {
-            bail!("Unsupported connection CSV column '{column}'");
+            bail!("Unsupported connection CSV column");
         };
         ensure!(
-            !present[index],
-            "Duplicate connection CSV column '{column}'"
+            indices[index] == usize::MAX,
+            "Duplicate connection CSV column"
         );
-        present[index] = true;
-        normalized_header.push_field(expected[index]);
+        indices[index] = position;
     }
-    ensure!(
-        present.iter().all(|seen| *seen),
-        "Connection CSV must contain the name, host, port, username and password columns"
-    );
-    reader.set_headers(normalized_header);
-    let parsed = reader
-        .deserialize::<CsvRow>()
-        .map(|r| {
-            let password = r
-                .as_ref()
-                .ok()
-                .and_then(|row| (!row.password.is_empty()).then(|| row.password.clone()));
-            let profile = r.map(|row| Profile {
-                id: Id::new_v4(),
-                name: row.name,
-                host: row.host,
-                port: row.port,
-                username: row.username,
-            });
-            (profile.map_err(|e| e.to_string()), password)
-        })
-        .collect::<Vec<_>>();
     let mut seen = existing.to_vec();
     let mut rows = Vec::new();
-    for (index, (parsed, password)) in parsed.into_iter().enumerate() {
-        match parsed {
-            Err(error) => rows.push(ImportRow {
-                row: index + 1,
-                profile: None,
-                password: None,
-                duplicate: None,
-                error: Some(error),
-            }),
-            Ok(profile) => match profile.validate() {
-                Err(error) => rows.push(ImportRow {
-                    row: index + 1,
-                    profile: None,
-                    password: None,
-                    duplicate: None,
-                    error: Some(error),
-                }),
-                Ok(()) => {
-                    let duplicate = seen.iter().find(|p| p.duplicates(&profile)).map(|p| p.id);
-                    if duplicate.is_none() {
-                        seen.push(profile.clone());
-                    }
-                    rows.push(ImportRow {
-                        row: index + 1,
-                        profile: Some(profile),
-                        password,
-                        duplicate,
-                        error: None,
-                    });
-                }
-            },
+    for (index, record) in reader.records().enumerate() {
+        let mut row = ImportRow {
+            row: index + 1,
+            profile: None,
+            password: None,
+            duplicate: None,
+            error: None,
+        };
+        let record = match record {
+            Ok(record) if record.len() == 5 => record,
+            _ => {
+                row.error = Some("Invalid CSV record; expected five fields".into());
+                rows.push(row);
+                continue;
+            }
+        };
+        let field = |index: usize| record.get(indices[index]).unwrap_or("");
+        let port = match field(2).trim().parse::<u16>() {
+            Ok(port) if port != 0 => port,
+            _ => {
+                row.error = Some("Port must be between 1 and 65535".into());
+                rows.push(row);
+                continue;
+            }
+        };
+        let profile = Profile {
+            id: Id::new_v4(),
+            name: field(0).trim().into(),
+            host: field(1).trim().into(),
+            port,
+            username: field(3).trim().into(),
+        };
+        if profile.validate().is_err() {
+            row.error = Some("Invalid connection name, host or username".into());
+        } else {
+            row.duplicate = seen.iter().find(|p| p.duplicates(&profile)).map(|p| p.id);
+            if row.duplicate.is_none() {
+                seen.push(profile.clone());
+            }
+            row.password = (!field(4).is_empty()).then(|| field(4).to_string());
+            row.profile = Some(profile);
         }
+        rows.push(row);
     }
     Ok(ImportPreview { rows })
 }
 
-/// Merge only validated rows; matching records retain their history/credential identity.
-pub fn merge(existing: &[Profile], preview: &ImportPreview, replace: bool) -> Vec<Profile> {
+/// Re-evaluate duplicate identities against the latest committed list, not the preview snapshot.
+fn merge_plan(
+    existing: &[Profile],
+    preview: &ImportPreview,
+    replace: bool,
+) -> (Vec<Profile>, PasswordRetry) {
     let mut output = existing.to_vec();
+    let mut secrets = HashMap::new();
     for row in &preview.rows {
-        if let Some(profile) = &row.profile {
-            if let Some(index) = output.iter().position(|p| p.duplicates(profile)) {
-                if replace {
-                    let mut p = profile.clone();
-                    p.id = output[index].id;
-                    output[index] = p;
-                }
-            } else {
-                output.push(profile.clone());
+        let Some(profile) = row.profile.as_ref().filter(|_| row.error.is_none()) else {
+            continue;
+        };
+        let id = if let Some(index) = output.iter().position(|p| p.duplicates(profile)) {
+            if !replace {
+                continue;
             }
+            let id = output[index].id;
+            output[index] = Profile {
+                id,
+                ..profile.clone()
+            };
+            id
+        } else {
+            output.push(profile.clone());
+            profile.id
+        };
+        if let Some(password) = &row.password {
+            secrets.insert(id, Zeroizing::new(password.clone()));
         }
     }
-    output
+    (output, PasswordRetry(secrets.into_iter().collect()))
+}
+pub fn merge(existing: &[Profile], preview: &ImportPreview, replace: bool) -> Vec<Profile> {
+    merge_plan(existing, preview, replace).0
 }
 
-/// Export as CSV with the stored password (when available) after the username.
-/// The id column is omitted; duplicates on re-import match by endpoint identity.
-pub fn export(
-    profiles: &[Profile],
-    secrets: &std::collections::HashMap<Id, String>,
-) -> Result<String> {
+/// Retains only failed explicit password writes, with no Debug or serialization surface.
+#[derive(Default, Clone)]
+pub struct PasswordRetry(Vec<(Id, Zeroizing<String>)>);
+impl PasswordRetry {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+pub struct ImportResult {
+    pub profiles: Vec<Profile>,
+    pub failed: PasswordRetry,
+}
+
+/// Commit public metadata first. No credential operation runs if the transaction fails.
+pub fn import_confirmed(
+    db: &mut Database,
+    store: &dyn SecretStore,
+    preview: &ImportPreview,
+    replace: bool,
+) -> Result<ImportResult> {
+    let (profiles, pending) = merge_plan(&db.profiles()?, preview, replace);
+    db.save_profiles(&profiles)?;
+    retry_passwords(db, store, pending)
+}
+/// Retrying credentials cannot replay an old profile snapshot or recreate deleted identities.
+pub fn retry_passwords(
+    db: &Database,
+    store: &dyn SecretStore,
+    pending: PasswordRetry,
+) -> Result<ImportResult> {
+    let profiles = db.profiles()?;
+    let mut failed = Vec::new();
+    for (id, secret) in pending.0 {
+        if profiles.iter().any(|profile| profile.id == id) && store.write(id, &secret).is_err() {
+            failed.push((id, secret));
+        }
+    }
+    Ok(ImportResult {
+        profiles,
+        failed: PasswordRetry(failed),
+    })
+}
+
+/// Caller writes the result as a sensitive UTF-8 BOM file after explicit export selection.
+pub fn export(profiles: &[Profile], secrets: &HashMap<Id, String>) -> Result<String> {
     let mut writer = csv::Writer::from_writer(Vec::new());
     writer.write_record(["name", "host", "port", "username", "password"])?;
     for p in profiles {
@@ -178,4 +248,44 @@ pub fn export(
         ])?;
     }
     Ok(String::from_utf8(writer.into_inner()?)?)
+}
+
+/// Export with BOM and private file permissions; any unavailable credential aborts the export.
+pub fn export_file(path: &Path, profiles: &[Profile], store: &dyn SecretStore) -> Result<()> {
+    use std::io::Write;
+    struct Secrets(HashMap<Id, String>);
+    impl Drop for Secrets {
+        fn drop(&mut self) {
+            for secret in self.0.values_mut() {
+                secret.zeroize();
+            }
+        }
+    }
+    let mut secrets = Secrets(HashMap::new());
+    for profile in profiles {
+        if let Some(secret) = store.read(profile.id)? {
+            secrets.0.insert(profile.id, secret.to_string());
+        }
+    }
+    let text = Zeroizing::new(export(profiles, &secrets.0)?);
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        ensure!(
+            meta.is_file() && !meta.file_type().is_symlink(),
+            "Export target must be a regular file"
+        );
+    }
+    let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        temporary
+            .as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    temporary.write_all(b"\xef\xbb\xbf")?;
+    temporary.write_all(text.as_bytes())?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path)?;
+    Ok(())
 }
