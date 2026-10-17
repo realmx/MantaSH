@@ -91,6 +91,19 @@ MantaSH 首个公开产品版本，包含：
 
 ### 2026-10-17
 
+- **修复自动日志 workflow 的 runner 上下文位置** · [dc1755a](https://github.com/realmx/MantaSH/commit/dc1755adf5b325f9a9efe62067c6b3e93bb601fc)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+将 TMPDIR 的 runner.temp 表达式从 job 级 env 移到执行步骤的 env，使 GitHub 能解析并运行更新日志 workflow；补齐此前源码提交的生成记录。
+
+验证：actionlint 对 changelog.yml 与 ci.yml 的检查通过；日志生成与完整性检查、文档检查和 git diff --check 通过。生成器实现未变，沿用已通过的 14 项专项测试。
+```
+
+</details>
+
 - **补齐完整更新日志并自动同步每次 master 提交** · [0f6e6c2](https://github.com/realmx/MantaSH/commit/0f6e6c22c32dc074fd056bb7983bc2dd9e63c9c7)
 
 <details>
