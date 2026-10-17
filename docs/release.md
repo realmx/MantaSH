@@ -27,6 +27,24 @@ Actions 使用 checkout 配置的任务自身 `GITHUB_TOKEN`，通过非强制 G
 git push origin master
 ```
 
+## 更新日志自动生成
+
+[CHANGELOG.md](../CHANGELOG.md) 包含人工维护的功能摘要与完整逐次提交记录。后者由 [update_changelog.py](../scripts/update_changelog.py) 从当前分支的全部可达 Git 历史生成，保留标题、完整正文、提交日期与链接，包含合并、空提交、文档提交和同一 push 中的每条提交；不依据标题前缀筛除变更。现有历史从仓库重建提交开始，不推断更早记录；提交原文也不代表发布或平台验收成功。
+
+每次 push 到 `master`（含 PR 合并）触发 [Update changelog](../.github/workflows/changelog.yml)。workflow 使用完整历史，在隔离检出中更新自动区、验证文档，再用自身 `GITHUB_TOKEN` 非强制推送一个仅修改 `CHANGELOG.md` 的同步提交。人工摘要与本地工作区不由生成器改写；自动区不手工编辑。机器人提交带 `MantaSH-Changelog: generated` 尾注，且只有单亲、仅改日志的这类提交才从生成结果中排除。
+
+任务按仓库串行运行；遇到并发 push 时，重新取得最新 `master` 并生成，最多尝试三次。无变化不提交；权限或分支规则拒绝时保留错误并失败，不切换凭据或强制推送。`GITHUB_TOKEN` 的同步 push 不递归触发 workflow，也不分配版本或派发 Release；源码发布仍由原始 push 的版本流程处理。手动重跑 Update changelog 可补齐失败的同步。
+
+自动写回发生在提交推送到 `master` 之后。继续本地开发前拉取机器人新增的文档提交；仅在本地尚未推送的提交、其它开发分支可手动预览：
+
+```sh
+python3 scripts/update_changelog.py generate
+python3 scripts/update_changelog.py check
+python3 -m unittest discover -s tests -p 'test_changelog.py'
+```
+
+`generate --output <文件>` 只输出预览，不替换仓库日志；`check` 仅检查已提交历史是否完整，不写文件。浅克隆须先取得完整历史，生成器不会把截断的历史写成完整日志。提交正文应说明实际行为、原因和已执行验证；自动记录不能替代人工补充历史提交中未写明的功能摘要。
+
 ## 正式产物
 
 正式安装包面向 macOS 和 Windows，不提供便携 ZIP。每个安装包附一个同名 `.sha256`：
@@ -68,7 +86,7 @@ brew upgrade --cask mantash
 
 ```sh
 python3 scripts/release_version.py validate --version X.Y.Z
-python3 -m py_compile scripts/package_release.py scripts/verify_macos_dmg.py scripts/release_version.py scripts/release_matrix.py scripts/release_notes.py scripts/update_homebrew_cask.py
+python3 -m py_compile scripts/package_release.py scripts/verify_macos_dmg.py scripts/release_version.py scripts/release_matrix.py scripts/release_notes.py scripts/update_homebrew_cask.py scripts/update_changelog.py
 python3 -m unittest discover -s tests -p 'test_release_*.py'
 ```
 

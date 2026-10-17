@@ -30,7 +30,7 @@ MantaSH 的文档按使用、工程维护和发布验收组织。功能以当前
 |---|---|
 | [发布与版本](release.md) | 自动版本、构建矩阵、安装包、校验、Homebrew 与失败重跑 |
 | [验收记录](acceptance.md) | 已运行检查、历史人工确认和尚未验证的范围 |
-| [更新日志](../CHANGELOG.md) | 功能变更摘要与版本索引 |
+| [更新日志](../CHANGELOG.md) | 功能摘要与自动生成的完整逐次提交记录 |
 | [品牌设计](brand-philosophy.md) | 标识设计依据 |
 | [第三方声明](../THIRD_PARTY.md) / [依赖清单](dependency-licenses.csv) / [许可证](../LICENSE) | 依赖来源、授权与分发要求 |
 

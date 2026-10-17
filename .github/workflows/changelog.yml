@@ -1,0 +1,34 @@
+name: Update changelog
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: master-changelog
+  cancel-in-progress: false
+
+jobs:
+  changelog:
+    name: Record every commit on master
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      TMPDIR: ${{ runner.temp }}
+    steps:
+      - name: Check out current master with complete history
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Test changelog generation and publication
+        run: python3 -m unittest discover -s tests -p 'test_changelog.py'
+      - name: Generate, validate and publish the commit log
+        # GITHUB_TOKEN pushes do not recursively trigger workflows. The generator
+        # also excludes its marked log-only commit, making reruns a no-op.
+        run: python3 scripts/update_changelog.py publish
