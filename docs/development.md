@@ -215,6 +215,6 @@ Windows 标题栏空白拖动达到阈值后释放捕获并投递 `WM_SYSCOMMAND
 | [taffy-compat](../vendor/taffy-compat/README.md) | 保持 GPUI 所需 0.9.0 包身份，转导出固定提交的 Taffy 0.9.2，采用修复的 grid 1.x；GPUI 接受修复版后移除 |
 | [gpui-component](../vendor/gpui-component/MANTASH-PATCH.md) | 0.5.1 的显式编辑事务、选区/滚动恢复、撤销分组，以及按钮按 variant 使用 hover 前景；上游提供等价 API 后移除对应补丁，保留说明与许可证 |
 
-LOGO 几何源在 assets SVG，[generate_logo.py](../scripts/generate_logo.py) 用 Pillow 生成 PNG/ICO/ICNS；资源规范见[设计规范](design.md)。本地验包用 [package_release.py](../scripts/package_release.py)，DMG 验证用 [verify_macos_dmg.py](../scripts/verify_macos_dmg.py)。版本、runner 构建、签名及 [release_version.py](../scripts/release_version.py) 等发布脚本统一见[发布文档](release.md)，不把打包或 Actions 构建当作目标平台人工通过。
+Logo 几何与配色统一维护在 [generate_logo.py](../scripts/generate_logo.py)，由它生成 assets 中的 SVG、PNG、ICO 和 ICNS；资源规范及复现检查见[设计规范](design.md#品牌资源)。本地验包用 [package_release.py](../scripts/package_release.py)，DMG 验证用 [verify_macos_dmg.py](../scripts/verify_macos_dmg.py)。版本、runner 构建、签名及 [release_version.py](../scripts/release_version.py) 等发布脚本统一见[发布文档](release.md)，不把打包或 Actions 构建当作目标平台人工通过。
 
 开始修改前确认工作区已有改动与授权范围；代码沿用架构边界，新增文案进入 `src/ui/i18n.rs`，控件走统一包装层及 `theme::SPACE_*`。按功能维护文档和提交要求见[贡献指南](../CONTRIBUTING.md)，自动化协作者遵守 [AGENTS.md](../AGENTS.md)。

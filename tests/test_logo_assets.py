@@ -1,4 +1,4 @@
-"""Regression checks for macOS system-icon backing, including every shipped ICNS representation."""
+"""Check reproducible brand assets and every shipped macOS icon representation."""
 from pathlib import Path
 import sys
 import tempfile
@@ -27,7 +27,7 @@ class MacIconTests(unittest.TestCase):
                 w, h = rgba.size
                 for edge in [(0, 0, w, 1), (0, h - 1, w, h), (0, 0, 1, h), (w - 1, 0, w, h)]:
                     self.assertEqual(rgba.crop(edge).getextrema(),
-                                     ((20, 20), (42, 42), (69, 69), (255, 255)))
+                                     ((16, 16), (27, 27), (42, 42), (255, 255)))
 
     def test_macos_generation_matches_checked_in_png_and_keeps_other_assets(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -58,7 +58,14 @@ class MacIconTests(unittest.TestCase):
                 self.assertEqual(icon.size, (1024, 1024))
             for name in ("mantash.svg", "mantash-monochrome.svg", "mantash-black.svg",
                          "mantash-white.svg", "mantash-mark.svg"):
-                self.assertTrue((destination / name).is_file(), name)
+                self.assertEqual((destination / name).read_bytes(),
+                                 (ROOT / "assets" / name).read_bytes(), name)
+            for name in ("mantash-128.png", "mantash.ico"):
+                with Image.open(destination / name) as generated, \
+                        Image.open(ROOT / "assets" / name) as shipped:
+                    self.assertEqual(generated.size, shipped.size, name)
+                    self.assertEqual(generated.convert("RGBA").tobytes(),
+                                     shipped.convert("RGBA").tobytes(), name)
 
 
 if __name__ == "__main__":

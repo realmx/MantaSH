@@ -1,5 +1,7 @@
 # MantaSH
 
+![MantaSH 折峰 Logo](assets/mantash-128.png)
+
 [English](README.en.md)
 
 **MantaSH** 是基于 Rust 和 GPUI 的原生终端工作台，将本地 Shell、SSH、远程文件、编辑和 Linux 主机监控集中在一个窗口中。
@@ -44,7 +46,7 @@ brew install realmx/taps/mantash --cask
 
 ## 界面预览
 
-以下为 macOS 原生窗口实拍，五张截图统一使用黑夜主题。截图使用隔离数据目录与真实回环 SSH/SFTP 服务，端口、临时路径和文件仅属于测试环境，不含生产凭据。窗口为 1280×800，图片保留 2× Retina 分辨率；拍摄构建与证据范围见[验收记录](docs/acceptance.md#readme-原生截图)。
+以下为使用折峰 Logo 的 macOS 原生窗口实拍，五张截图统一使用黑夜主题。截图使用隔离数据目录与真实回环 SSH/SFTP 服务，端口、临时路径和文件仅属于测试环境，不含生产凭据。窗口为 1280×800，图片保留 2× Retina 分辨率；拍摄构建与证据范围见[验收记录](docs/acceptance.md#readme-原生截图)。
 
 ![本地终端：黑夜主题与混合分屏](assets/screenshots/local-workspace.png)
 

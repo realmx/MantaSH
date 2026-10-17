@@ -1,5 +1,7 @@
 # MantaSH
 
+![MantaSH Folded Summit logo](assets/mantash-128.png)
+
 [中文](README.md)
 
 **MantaSH** is a native terminal workspace built with Rust and GPUI. It brings local Shells, SSH, remote files, editing and Linux host monitoring into one window.
@@ -44,7 +46,7 @@ Profiles support five-column CSV import/export: `name,host,port,username,passwor
 
 ## Screenshots
 
-These five full native macOS window captures all use the dark theme. They use isolated data and a real loopback SSH/SFTP server; ports, temporary paths and files belong to the test environment, with no production credentials. The window is 1280×800 and the images retain 2× Retina resolution. See the [acceptance record](docs/acceptance.md#readme-原生截图) for the captured build and scope.
+These five full native macOS window captures show the Folded Summit logo and all use the dark theme. They use isolated data and a real loopback SSH/SFTP server; ports, temporary paths and files belong to the test environment, with no production credentials. The window is 1280×800 and the images retain 2× Retina resolution. See the [acceptance record](docs/acceptance.md#readme-原生截图) for the captured build and scope.
 
 ![Local terminal: dark theme and mixed split panes](assets/screenshots/local-workspace.png)
 

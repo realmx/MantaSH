@@ -153,10 +153,10 @@ macOS 使用 AppKit 标准「窗口」菜单，常用平铺、居中、填满、
 
 正式名称与字标统一为 **MantaSH**（M、S、H 大写，不附加句点）。窗口标题、菜单、品牌展示和文档使用同一写法。程序、包名、文件路径和环境变量属于技术标识，遵循各自的命名规范。
 
-标识为“共享透镜”抽象构成：两个交叠的圆——左上实心圆（品牌蓝 `#1F7FA6`）与右下空心圆（白色描边，描边宽约网格 4.4 单位）——在中央共享一枚透镜，隐喻本地与远端、终端与文件面板的一次连接。主应用图标为深蓝 `#142A45` 圆角底；原生工具栏使用随主题着色的单色版本（[mark SVG](../assets/mantash-mark.svg) 为品牌蓝双圆）。
+标识为“折峰”：四片平面折叠成字母 M，依次使用薄荷绿 `#B6F1DE`、青绿 `#58BEBA`、浅冰色 `#D6F6F0` 和淡紫 `#7F91DA`，背景为深蓝 `#101B2A`。主形占标准画布宽度的 55.8%，保持选定方案的居中与留白。原生顶栏和关于窗口使用随主题着色的单色外轮廓；[透明彩色标识](../assets/mantash-mark.svg) 与单色版本使用收紧的视框，以维持小尺寸识别度。
 
-源文件为 [彩色 SVG](../assets/mantash.svg)、[单色 SVG](../assets/mantash-monochrome.svg)、[黑色版](../assets/mantash-black.svg) 和 [白色版](../assets/mantash-white.svg)。交付 PNG 16/32/64/128/256/512/1024、[ICO](../assets/mantash.ico) 与 [ICNS](../assets/mantash.icns)。图形具有独立轮廓，小尺寸不依赖细线或文字识别。
+资源包括[带底彩色 SVG](../assets/mantash.svg)、[单色 SVG](../assets/mantash-monochrome.svg)、[黑色版](../assets/mantash-black.svg)、[白色版](../assets/mantash-white.svg)、128px 文档 PNG、1024px macOS PNG、[ICO](../assets/mantash.ico) 与 [ICNS](../assets/mantash.icns)。ICO 内置 16/24/32/48/64/128/256px 表示，ICNS 内置平台多尺寸表示。macOS 图标铺满不透明深蓝背景、由系统处理轮廓；Windows ICO、文档 PNG 和带底 SVG 使用圆角背景。
 
 ![MantaSH](../assets/mantash-128.png)
 
-`scripts/generate_logo.py` 按同一 64 单位几何生成应用矢量、文档 PNG 和平台 ICO/ICNS，设计依据为 [折流](brand-philosophy.md)。生成过程不依赖字体文件；应用文字仍尊重用户选择的界面字体。使用 Python 3.10 或更新版本，复现命令为 `python3 -m pip install -r requirements-tools.txt` 后运行 `python3 scripts/generate_logo.py`。生成资源不代表已完成应用打包、签名或发布；实际窗口截图与输入法/平台待验项见 [原生验收](acceptance.md)。
+[generate_logo.py](../scripts/generate_logo.py) 是品牌几何与配色的唯一来源，按同一 64 单位几何生成 SVG、文档 PNG 和平台 ICO/ICNS，设计依据为[折峰](brand-philosophy.md)。透明标识采用 48 单位视框；单色版本使用连续外轮廓，避免色面交界的细缝。生成过程不依赖字体文件，应用文字仍尊重用户选择的界面字体。使用 Python 3.10 或更新版本，复现命令为 `python3 -m pip install -r requirements-tools.txt` 后运行 `python3 scripts/generate_logo.py`；运行 `python3 -m unittest discover -s tests -p test_logo_assets.py` 核对资源一致性。生成资源不代表已完成应用打包、签名或发布；实际窗口截图与输入法/平台待验项见[原生验收](acceptance.md)。

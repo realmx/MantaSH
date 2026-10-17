@@ -1,76 +1,70 @@
 #!/usr/bin/env python3
-"""Generate the MantaSH lens mark and platform icons from one geometry.
+"""Generate the MantaSH folded-M mark and platform icons from one geometry.
 
-The mark is two overlapping circles — one filled, one a hollow ring — sharing a
-lens where they meet: the local and the remote, the terminal and the file list,
-one connection made visible. Requires Pillow; no font files, network requests
-or application packaging are required.
+Four flat facets form the approved Folded Summit identity. The color icons keep
+its optical size and midnight-blue field; monochrome UI marks use the same
+outline with tighter clear space. Requires Pillow, without fonts or networking.
 """
 import argparse
 from pathlib import Path
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
-INK = "#142A45"
-BRAND = "#1F7FA6"
+INK = "#101B2A"
 WHITE = "#FFFFFF"
-# The two circles of the lens mark, on the shared 64-unit grid. The filled
-# disc sits up-left of the hollow ring; their overlap is the shared lens.
-DISC = (24.0, 26.0, 15.0)
-RING = (40.0, 38.0, 15.0)
-RING_WIDTH = 4.4
+# Preserve the approved composition: a 55.8%-wide mark, optically centered.
+# The original design spans x=214..786 and y=322..681 on a 1000-unit field.
+MARK_SCALE = 64 * 0.558 / 572
 
 
-def svg_document(disc, ring, tile=False):
-    """Keep every vector variant on the same grid, with no font or external-file dependency."""
+def on_grid(points):
+    """Resolve every facet and the continuous outline onto one 64-unit grid."""
+    return tuple((32 + (x - 500) * MARK_SCALE, 32 + (y - 501.5) * MARK_SCALE)
+                 for x, y in points)
+
+
+FACETS = (
+    ("#B6F1DE", on_grid(((214, 680), (214, 322), (328, 322), (328, 567)))),
+    ("#58BEBA", on_grid(((328, 322), (500, 500), (500, 681), (328, 505)))),
+    ("#D6F6F0", on_grid(((500, 500), (672, 322), (672, 505), (500, 681)))),
+    ("#7F91DA", on_grid(((672, 322), (786, 322), (786, 680), (672, 567)))),
+)
+# A continuous monochrome contour avoids antialiasing seams between facets.
+OUTLINE = on_grid(((214, 322), (328, 322), (500, 500), (672, 322),
+                   (786, 322), (786, 680), (672, 567), (672, 505),
+                   (500, 681), (328, 505), (328, 567), (214, 680)))
+
+
+def svg_document(monochrome=None, tile=False):
+    """Use tighter clear space for transparent marks in the native toolbar."""
+    viewbox = "0 0 64 64" if tile else "8 8 48 48"
     background = f'<rect x="2" y="2" width="60" height="60" rx="14" fill="{INK}"/>' if tile else ""
+    facets = FACETS if monochrome is None else ((monochrome, OUTLINE),)
+    shapes = "".join(
+        '<polygon points="' + " ".join(f"{x:.6f},{y:.6f}" for x, y in points)
+        + f'" fill="{color}"/>' for color, points in facets
+    )
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MantaSH">'
-        f'{background}'
-        f'<circle cx="{DISC[0]}" cy="{DISC[1]}" r="{DISC[2]}" fill="{disc}"/>'
-        f'<circle cx="{RING[0]}" cy="{RING[1]}" r="{RING[2]}" fill="none" stroke="{ring}" stroke-width="{RING_WIDTH}"/></svg>\n'
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{viewbox}" role="img" aria-label="MantaSH">'
+        f'{background}{shapes}</svg>\n'
     )
 
 
-def render_mark(pixels, disc=BRAND, ring=WHITE, tile=True):
-    """Supersample the lens mark, preserving the ring's weight at 16px."""
+def render_mark(pixels, tile=True):
+    """Supersample the shared facets, keeping crisp folds at small icon sizes."""
     scale = 32
     image = Image.new("RGBA", (64 * scale, 64 * scale))
     draw = ImageDraw.Draw(image)
     if tile:
-        draw.rounded_rectangle((2 * scale, 2 * scale, 62 * scale - 1, 62 * scale - 1), radius=14 * scale, fill=INK)
-    draw.ellipse(
-        (
-            (DISC[0] - DISC[2]) * scale,
-            (DISC[1] - DISC[2]) * scale,
-            (DISC[0] + DISC[2]) * scale,
-            (DISC[1] + DISC[2]) * scale,
-        ),
-        fill=disc,
-    )
-    # PIL strokes grow inward from the bounding box; offset by half the width
-    # so the ring's centerline sits on the same radius the SVG strokes.
-    half = RING_WIDTH / 2
-    draw.ellipse(
-        (
-            (RING[0] - RING[2] - half) * scale,
-            (RING[1] - RING[2] - half) * scale,
-            (RING[0] + RING[2] + half) * scale,
-            (RING[1] + RING[2] + half) * scale,
-        ),
-        outline=ring,
-        width=int(RING_WIDTH * scale),
-    )
+        draw.rounded_rectangle((2 * scale, 2 * scale, 62 * scale - 1, 62 * scale - 1),
+                               radius=14 * scale, fill=INK)
+    for color, points in FACETS:
+        draw.polygon([(x * scale, y * scale) for x, y in points], fill=color)
     return image.resize((pixels, pixels), Image.Resampling.LANCZOS)
 
 
 def render_macos_icon(pixels):
-    """Fill the macOS icon canvas; let the system apply its own rounded mask.
-
-    A pre-rounded tile with transparent padding can expose the system's light
-    backing plate in process lists and other small native icon presentations.
-    Keep the mark geometry shared with the other platforms, without that padding.
-    """
+    """Fill the macOS canvas so system masks cannot expose a light backing plate."""
     background = Image.new("RGBA", (pixels, pixels), INK)
     return Image.alpha_composite(background, render_mark(pixels, tile=False))
 
@@ -91,14 +85,14 @@ def main():
     if args.macos_only:
         write_macos_icons(destination)
         return
-    for name, disc, ring, tile in [
-        ("mantash.svg", BRAND, WHITE, True),
-        ("mantash-monochrome.svg", "#000000", "#000000", False),
-        ("mantash-black.svg", "#000000", "#000000", False),
-        ("mantash-white.svg", WHITE, WHITE, False),
-        ("mantash-mark.svg", BRAND, BRAND, False),
+    for name, monochrome, tile in [
+        ("mantash.svg", None, True),
+        ("mantash-monochrome.svg", "#000000", False),
+        ("mantash-black.svg", "#000000", False),
+        ("mantash-white.svg", WHITE, False),
+        ("mantash-mark.svg", None, False),
     ]:
-        (destination / name).write_text(svg_document(disc, ring, tile))
+        (destination / name).write_text(svg_document(monochrome, tile), encoding="utf-8")
     # Only this standalone size is consumed by documentation. ICO/ICNS carry their own sizes.
     render_mark(128).save(destination / "mantash-128.png")
     bitmap = render_mark(1024)
