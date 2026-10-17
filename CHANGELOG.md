@@ -93,6 +93,23 @@ MantaSH 首个公开产品版本，包含：
 
 ### 2026-10-17
 
+- **统一采用折峰 Logo 并更新全部原生截图** · [4e633b8](https://github.com/realmx/MantaSH/commit/4e633b8d1cfb5d22321f735bfdf099ec49a495a2)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+将选定的 04「折峰」四片折叠 M 统一用于彩色、透明、单色、黑色和白色 SVG，以及文档 PNG、Windows ICO 和 macOS ICNS。几何与配色集中在生成脚本，保持选稿比例、主题着色和 macOS 不透明满画布规则，扩展已提交资源的一致性检查。
+
+使用包含新品牌资源的原生 debug 构建，重拍本地分屏、SSH 文件工作区、在线编辑、上传核对和设置五张黑夜截图，保留 1280×800 窗口与 2560×1600 Retina 原图。核验真实回环 SSH/SFTP、编辑器内容和关于窗口标识，同步中英文 README、品牌规范、开发文档、验收记录和功能更新摘要。
+
+清理选稿目录、绘图脚本、预览服务、截图中间文件、隔离应用/SSH 数据及临时工具环境，保留正式资源和可复现生成脚本。
+
+验证：cargo fmt；核心测试 154 通过、1 ignored；核心/桌面 cargo check 与 debug build；Pillow 12.3.0 下图标测试 3 通过；发布脚本测试 35 通过；22 份必需文档及 244 个本地链接/锚点；自动日志状态、Python 语法与 git diff 检查。Windows 实机、安装后的系统图标缓存与安装包签名验收未执行。
+```
+
+</details>
+
 - **修复自动日志 workflow 的 runner 上下文位置** · [dc1755a](https://github.com/realmx/MantaSH/commit/dc1755adf5b325f9a9efe62067c6b3e93bb601fc)
 
 <details>
