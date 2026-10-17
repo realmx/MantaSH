@@ -94,6 +94,23 @@ MantaSH 首个公开产品版本，包含：
 
 ### 2026-10-17
 
+- **清理冗余品牌图标并精简资源生成** · [a261246](https://github.com/realmx/MantaSH/commit/a261246fef9b836aba326d70a6ba53cc28bbc302)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+删除未被运行时或打包使用的带底彩色 SVG、透明彩色 SVG、备用黑白 SVG 和 macOS 1024px 预览 PNG，仅保留实际使用的界面单色 SVG、README PNG、Windows ICO 和 macOS ICNS。界面全部 20 个操作图标和命令执行图标仍有调用，保持原样。
+
+精简品牌生成脚本，只输出四个正式文件；macOS 单平台模式只生成 ICNS。同步品牌文档和手写更新摘要，资源检查验证完整输出集合、单平台生成隔离及 ICNS 各尺寸与已提交资源一致。
+
+实际重新生成后的保留图标与五张 README 截图逐字节一致，其余 398 个已跟踪文件未变。清理本轮日志、临时目录和 Pillow 工具环境。
+
+验证：cargo fmt --all -- --check；cargo test --locked --no-default-features --all-targets（154 通过、1 ignored）；核心及桌面 cargo check --all-targets；cargo build --locked；Pillow 12.3.0 图标测试 3 通过；文档检查 22 份必需文件及 241 个本地链接/锚点；Python 语法、自动日志状态及 git diff 检查通过。未执行 Windows 实机、安装包或新截图验收，运行时图标与既有截图内容未改变。
+```
+
+</details>
+
 - **统一采用折峰 Logo 并更新全部原生截图** · [4e633b8](https://github.com/realmx/MantaSH/commit/4e633b8d1cfb5d22321f735bfdf099ec49a495a2)
 
 <details>
