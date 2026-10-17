@@ -44,17 +44,17 @@ brew install realmx/taps/mantash --cask
 
 ## 界面预览
 
-以下为隔离数据目录中的完整 macOS 原生调试窗口截图；SSH/SFTP 使用真实回环测试服务。画面中的端口和临时路径仅属于测试环境，不含真实凭据。
+以下为 macOS 原生窗口实拍，五张截图统一使用黑夜主题。截图使用隔离数据目录与真实回环 SSH/SFTP 服务，端口、临时路径和文件仅属于测试环境，不含生产凭据。窗口为 1280×800，图片保留 2× Retina 分辨率；拍摄构建与证据范围见[验收记录](docs/acceptance.md#readme-原生截图)。
 
-![本地终端与分屏](assets/screenshots/local-workspace.png)
+![本地终端：黑夜主题与混合分屏](assets/screenshots/local-workspace.png)
 
-![SSH 文件工作区](assets/screenshots/ssh-workspace.png)
+![SSH 文件工作区：黑夜主题与行内文件操作](assets/screenshots/ssh-workspace.png)
 
-![SSH 在线编辑](assets/screenshots/ssh-editor.png)
+![在线编辑：黑夜主题、行号、格式化与保存](assets/screenshots/ssh-editor.png)
 
-![SSH 传输核对](assets/screenshots/ssh-transfer.png)
+![上传核对：文件大小与覆盖选项](assets/screenshots/ssh-transfer.png)
 
-![设置与版本](assets/screenshots/settings-version.png)
+![设置：分组开关、主题与语言选中态](assets/screenshots/settings-version.png)
 
 ## 开发与发布
 

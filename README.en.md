@@ -44,17 +44,17 @@ Profiles support five-column CSV import/export: `name,host,port,username,passwor
 
 ## Screenshots
 
-These are full native macOS debug-window captures from an isolated data directory. SSH/SFTP uses a real loopback test server; ports and temporary paths belong to that fixture, with no real credentials.
+These five full native macOS window captures all use the dark theme. They use isolated data and a real loopback SSH/SFTP server; ports, temporary paths and files belong to the test environment, with no production credentials. The window is 1280×800 and the images retain 2× Retina resolution. See the [acceptance record](docs/acceptance.md#readme-原生截图) for the captured build and scope.
 
-![Local terminal and split panes](assets/screenshots/local-workspace.png)
+![Local terminal: dark theme and mixed split panes](assets/screenshots/local-workspace.png)
 
-![SSH file workspace](assets/screenshots/ssh-workspace.png)
+![SSH file workspace: dark theme and inline file actions](assets/screenshots/ssh-workspace.png)
 
-![SSH online editor](assets/screenshots/ssh-editor.png)
+![Online editor: dark theme, line numbers, formatting and saving](assets/screenshots/ssh-editor.png)
 
-![SSH transfer review](assets/screenshots/ssh-transfer.png)
+![Upload review: file sizes and overwrite option](assets/screenshots/ssh-transfer.png)
 
-![Settings and version](assets/screenshots/settings-version.png)
+![Settings: grouped switches and selected theme and language](assets/screenshots/settings-version.png)
 
 ## Development and Releases
 
