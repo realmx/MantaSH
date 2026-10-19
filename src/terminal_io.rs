@@ -155,3 +155,38 @@ impl ScrollAccumulator {
         lines
     }
 }
+
+/// Interval between drag-selection auto-scroll steps while the pointer rests at an edge.
+pub const DRAG_AUTOSCROLL_INTERVAL_MS: u64 = 40;
+/// Pixels inside the viewport edge that already count as "at the edge", so a pane
+/// touching the screen border can still auto-scroll.
+pub const DRAG_AUTOSCROLL_EDGE: f32 = 2.;
+/// Upper bound for lines scrolled in one auto-scroll step.
+pub const DRAG_AUTOSCROLL_MAX_LINES: i32 = 10;
+
+/// Lines to scroll for one drag-selection auto-scroll step.
+///
+/// `pointer_y`, `top` and `bottom` share one coordinate space; `bottom` is the
+/// exclusive lower viewport edge. The sign matches `TerminalBuffer::scroll`:
+/// positive moves toward older history (pointer at/above the top edge), negative
+/// toward the live bottom (pointer at/below the bottom edge), and 0 inside. Each
+/// full line height past the edge adds one line per step, up to
+/// [`DRAG_AUTOSCROLL_MAX_LINES`].
+pub fn drag_autoscroll_lines(pointer_y: f32, top: f32, bottom: f32, line_height: f32) -> i32 {
+    if !(pointer_y.is_finite() && top.is_finite() && bottom.is_finite())
+        || !(line_height.is_finite() && line_height > 0.)
+        || bottom <= top
+    {
+        return 0;
+    }
+    let steps = |distance: f32| {
+        (1. + (distance.max(0.) / line_height).floor()).min(DRAG_AUTOSCROLL_MAX_LINES as f32) as i32
+    };
+    if pointer_y < top + DRAG_AUTOSCROLL_EDGE {
+        steps(top - pointer_y)
+    } else if pointer_y >= bottom - DRAG_AUTOSCROLL_EDGE {
+        -steps(pointer_y - bottom)
+    } else {
+        0
+    }
+}

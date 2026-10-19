@@ -493,13 +493,39 @@ impl TerminalBuffer {
         ));
     }
     /// Extend a drag selection using actual grid coordinates.
+    ///
+    /// Both the anchor cell and the cell under the pointer are always included,
+    /// whichever direction the drag goes. A fixed `Side::Left` anchor with a
+    /// `Side::Right` end only works top-to-bottom: once the end moves above or
+    /// left of the anchor, the emulator orders the points so the pointer end
+    /// starts on its right side (dropping that cell, e.g. column 0) and the
+    /// anchor ends on its left side (dropping the anchor cell), so the sides are
+    /// re-derived from the drag direction on every update.
     pub fn select_to(&mut self, col: usize, row: usize) {
         self.overlay_dirty = true;
         let point = self.point(col, row);
         if let Some(s) = &mut self.term.selection {
             s.update(point, Side::Right);
+            s.include_all();
             self.revision = self.revision.wrapping_add(1);
         }
+    }
+    /// Auto-scroll an active drag selection by `lines` (positive toward history)
+    /// and move its end to the viewport cell under the pointer. Returns false,
+    /// leaving the selection unchanged, when there is no selection or the
+    /// viewport is already at the history top or live bottom.
+    pub fn scroll_selection(&mut self, lines: i32, col: usize, row: usize) -> bool {
+        if lines == 0 || self.term.selection.is_none() {
+            return false;
+        }
+        let before = self.term.grid().display_offset();
+        self.term.scroll_display(Scroll::Delta(lines));
+        if self.term.grid().display_offset() == before {
+            return false;
+        }
+        self.revision = self.revision.wrapping_add(1);
+        self.select_to(col, row);
+        true
     }
     /// Copy via the emulator so wrapped lines and wide characters are handled correctly.
     pub fn selected_text(&self) -> Option<String> {

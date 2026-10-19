@@ -61,6 +61,10 @@ pub struct TerminalView {
     /// True while the overlay scrollbar thumb is being dragged.
     scroll_dragging: bool,
     selecting: bool,
+    /// Last window-space pointer of the active drag selection, inside or outside the view.
+    drag_pointer: Option<Point<Pixels>>,
+    /// True while an edge auto-scroll ticker is running for the drag selection.
+    drag_autoscroll: bool,
     mouse_reporting: bool,
     click_start: Option<Point<Pixels>>,
     click_moved: bool,
@@ -107,6 +111,8 @@ impl TerminalView {
             line_height: px(18.),
             scroll_dragging: false,
             selecting: false,
+            drag_pointer: None,
+            drag_autoscroll: false,
             mouse_reporting: false,
             click_start: None,
             click_moved: false,
@@ -383,11 +389,73 @@ impl TerminalView {
             }
         }
         self.selecting = true;
+        self.drag_pointer = Some(event.position);
         self.session
             .terminal
             .lock()
             .select_start(col, row, event.click_count == 2);
         cx.notify();
+    }
+    /// Extend the drag selection to a window-space pointer; positions outside the
+    /// view clamp to the nearest cell and start edge auto-scroll.
+    fn drag_selection_to(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.drag_pointer = Some(position);
+        let (col, row) = self.cell_at(position);
+        self.session.terminal.lock().select_to(col, row);
+        cx.notify();
+        self.start_drag_autoscroll(cx);
+    }
+    fn drag_autoscroll_lines(&self) -> i32 {
+        match self.drag_pointer {
+            Some(pointer) if self.selecting => crate::terminal_io::drag_autoscroll_lines(
+                f32::from(pointer.y),
+                f32::from(self.bounds.top()),
+                f32::from(self.bounds.bottom()),
+                f32::from(self.line_height),
+            ),
+            _ => 0,
+        }
+    }
+    /// Keep scrolling while the pointer rests at or beyond the top/bottom edge.
+    /// The ticker ends on release, when the pointer returns inside, or at the
+    /// history top/live bottom; the next drag move restarts it.
+    fn start_drag_autoscroll(&mut self, cx: &mut Context<Self>) {
+        if self.drag_autoscroll || self.drag_autoscroll_lines() == 0 {
+            return;
+        }
+        self.drag_autoscroll = true;
+        cx.spawn(async move |view, cx| {
+            loop {
+                gpui::Timer::after(std::time::Duration::from_millis(
+                    crate::terminal_io::DRAG_AUTOSCROLL_INTERVAL_MS,
+                ))
+                .await;
+                let keep = view
+                    .update(cx, |this, cx| this.drag_autoscroll_step(cx))
+                    .unwrap_or(false);
+                if !keep {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+    fn drag_autoscroll_step(&mut self, cx: &mut Context<Self>) -> bool {
+        let lines = self.drag_autoscroll_lines();
+        if let (true, Some(pointer)) = (lines != 0, self.drag_pointer) {
+            let (col, row) = self.cell_at(pointer);
+            if self
+                .session
+                .terminal
+                .lock()
+                .scroll_selection(lines, col, row)
+            {
+                cx.notify();
+                return true;
+            }
+        }
+        self.drag_autoscroll = false;
+        false
     }
     fn mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
         let (col, row) = self.cell_at(event.position);
@@ -401,8 +469,7 @@ impl TerminalView {
             self.selecting = false;
         }
         if self.selecting {
-            self.session.terminal.lock().select_to(col, row);
-            cx.notify();
+            self.drag_selection_to(event.position, cx);
         } else if event.pressed_button == Some(MouseButton::Left) {
             let mode = *self.session.terminal.lock().term.mode();
             if mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION) {
@@ -434,6 +501,7 @@ impl TerminalView {
         }
         self.mouse_reporting = false;
         self.selecting = false;
+        self.drag_pointer = None;
         self.click_start = None;
         cx.notify();
     }
@@ -659,6 +727,31 @@ impl Render for TerminalView {
                         let background =
                             Palette::new(paint.read(cx).preferences.effective_theme()).terminal;
                         window.paint_quad(fill(bounds, background));
+                        // The element's own move listener only fires while hovered.
+                        // During a drag selection, follow the pointer across the
+                        // whole window so leaving the top/bottom edge auto-scrolls.
+                        if paint.read(cx).selecting {
+                            let drag = paint.clone();
+                            window.on_mouse_event(
+                                move |event: &MouseMoveEvent, phase, _window, cx| {
+                                    if phase != DispatchPhase::Capture {
+                                        return;
+                                    }
+                                    drag.update(cx, |view, cx| {
+                                        if !view.selecting || view.bounds.contains(&event.position)
+                                        {
+                                            return;
+                                        }
+                                        if event.pressed_button != Some(MouseButton::Left) {
+                                            view.selecting = false;
+                                            view.drag_pointer = None;
+                                            return;
+                                        }
+                                        view.drag_selection_to(event.position, cx);
+                                    });
+                                },
+                            );
+                        }
                         let Some(prepared) = paint.update(cx, |view, _| view.prepare_paint(window))
                         else {
                             return;

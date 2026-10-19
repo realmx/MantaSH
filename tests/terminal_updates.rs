@@ -3,7 +3,10 @@ use alacritty_terminal::{grid::Dimensions, term::TermMode};
 use mantash::{
     encoding::Encoding,
     terminal::{self, TerminalBuffer, TerminalFrame},
-    terminal_io::{OutputWakeup, ScrollAccumulator},
+    terminal_io::{
+        DRAG_AUTOSCROLL_EDGE, DRAG_AUTOSCROLL_MAX_LINES, OutputWakeup, ScrollAccumulator,
+        drag_autoscroll_lines,
+    },
 };
 
 /// Merge only supplied damage into a retained frame, then compare with a complete read.
@@ -346,4 +349,119 @@ fn actual_pty_output_wakes_without_periodic_ui_polling() {
     assert!(!session.output_wakeup.pending());
     backend.close(owner);
     backend.shutdown();
+}
+
+#[test]
+fn drag_autoscroll_speed_follows_pointer_distance_past_an_edge() {
+    let (top, bottom, line) = (100., 460., 18.);
+    // Inside the viewport, away from the edges, nothing scrolls.
+    assert_eq!(
+        drag_autoscroll_lines(101. + DRAG_AUTOSCROLL_EDGE, top, bottom, line),
+        0
+    );
+    assert_eq!(drag_autoscroll_lines(280., top, bottom, line), 0);
+    assert_eq!(
+        drag_autoscroll_lines(bottom - DRAG_AUTOSCROLL_EDGE - 1., top, bottom, line),
+        0
+    );
+    // At or above the top edge scrolls toward history (positive), faster further out.
+    assert_eq!(drag_autoscroll_lines(top, top, bottom, line), 1);
+    assert_eq!(drag_autoscroll_lines(top + 1., top, bottom, line), 1);
+    assert_eq!(drag_autoscroll_lines(top - 17., top, bottom, line), 1);
+    assert_eq!(drag_autoscroll_lines(top - 18., top, bottom, line), 2);
+    assert_eq!(drag_autoscroll_lines(top - 60., top, bottom, line), 4);
+    // At or below the bottom edge scrolls toward live output (negative).
+    assert_eq!(drag_autoscroll_lines(bottom - 1., top, bottom, line), -1);
+    assert_eq!(drag_autoscroll_lines(bottom, top, bottom, line), -1);
+    assert_eq!(drag_autoscroll_lines(bottom + 40., top, bottom, line), -3);
+    // Speed is capped, and degenerate geometry never scrolls.
+    assert_eq!(
+        drag_autoscroll_lines(-10_000., top, bottom, line),
+        DRAG_AUTOSCROLL_MAX_LINES
+    );
+    assert_eq!(
+        drag_autoscroll_lines(10_000., top, bottom, line),
+        -DRAG_AUTOSCROLL_MAX_LINES
+    );
+    assert_eq!(drag_autoscroll_lines(0., top, bottom, 0.), 0);
+    assert_eq!(drag_autoscroll_lines(f32::NAN, top, bottom, line), 0);
+    assert_eq!(drag_autoscroll_lines(0., bottom, top, line), 0);
+}
+
+#[test]
+fn drag_autoscroll_extends_selection_through_history_and_stops_at_limits() {
+    let mut term = TerminalBuffer::new(Encoding::Utf8);
+    term.resize(20, 5);
+    for line in 0..30 {
+        term.feed(format!("line{line:02}\r\n").as_bytes());
+    }
+    let history = term.term.grid().history_size();
+    assert!(history > 10);
+    // Without a selection, auto-scroll is a no-op.
+    assert!(!term.scroll_selection(3, 0, 0));
+    assert_eq!(term.term.grid().display_offset(), 0);
+
+    // Drag from the bottom viewport row upward past the top edge.
+    term.select_start(5, 3, false);
+    assert!(term.scroll_selection(3, 0, 0));
+    assert_eq!(term.term.grid().display_offset(), 3);
+    // The end follows the scrolled content: viewport row 0 is now line23.
+    let text = term.selected_text().unwrap();
+    assert!(text.starts_with("line23\nline24"), "{text:?}");
+    assert_eq!(text.lines().count(), 7, "{text:?}");
+
+    // Running into the top of history stops further scrolling.
+    assert!(term.scroll_selection(1_000, 0, 0));
+    assert_eq!(term.term.grid().display_offset(), history);
+    assert!(!term.scroll_selection(1, 0, 0));
+    let text = term.selected_text().unwrap();
+    assert!(text.starts_with("line00\nline01"), "{text:?}");
+
+    // Dragging back down past the bottom edge follows content to the live bottom.
+    assert!(term.scroll_selection(-1_000, 19, 4));
+    assert_eq!(term.term.grid().display_offset(), 0);
+    assert!(!term.scroll_selection(-1, 19, 4));
+    // The anchor stays on line29; the end is now below it on the live screen.
+    let text = term.selected_text().unwrap();
+    assert!(!text.contains("line28"), "{text:?}");
+}
+
+#[test]
+fn reverse_drag_selection_includes_the_first_column_and_the_anchor_cell() {
+    let mut term = TerminalBuffer::new(Encoding::Utf8);
+    term.resize(20, 5);
+    term.feed(b"[INFO] alpha\r\n[WARN] bravo\r\n#3 charlie");
+
+    // Forward drag keeps both end cells.
+    term.select_start(0, 0, false);
+    term.select_to(5, 1);
+    assert_eq!(term.selected_text().unwrap(), "[INFO] alpha\n[WARN]");
+
+    // Bottom-to-top drag ending on column 0 includes the '[' there and the
+    // anchor cell 'r' where the drag started.
+    term.select_start(4, 2, false);
+    term.select_to(0, 0);
+    assert_eq!(
+        term.selected_text().unwrap(),
+        "[INFO] alpha\n[WARN] bravo\n#3 ch"
+    );
+
+    // Same-line right-to-left drag, and a pointer past the left edge (the view
+    // clamps it to column 0).
+    term.select_start(5, 1, false);
+    term.select_to(0, 1);
+    assert_eq!(term.selected_text().unwrap(), "[WARN]");
+
+    // Returning to the anchor cell selects exactly that cell in both orders.
+    term.select_to(5, 1);
+    assert_eq!(term.selected_text().unwrap(), "]");
+
+    // Auto-scroll clamps the end to column 0 of the top row and must keep it.
+    for line in 0..30 {
+        term.feed(format!("\r\n{line:02}x").as_bytes());
+    }
+    term.select_start(2, 4, false);
+    assert!(term.scroll_selection(2, 0, 0));
+    let text = term.selected_text().unwrap();
+    assert_eq!(text, "23x\n24x\n25x\n26x\n27x\n28x\n29x");
 }
