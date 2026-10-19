@@ -94,6 +94,25 @@ MantaSH 首个公开产品版本，包含：
 
 本区按 Git 完整历史自动生成，包含普通提交、合并和文档更新；仅省略机器人自身的日志同步提交。日期为提交日期，正文保留原始说明，不代表对应版本已经发布或通过平台验收。
 
+### 2026-10-20
+
+- **修复终端反向拖选并支持边缘自动滚动** · [087810a](https://github.com/realmx/MantaSH/commit/087810a66b8c0b70ea5b2fdd8e20748271f82440)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+按拖选方向包含起点和终点字符，修复从下往上或从右往左选择时漏掉行首和锚点字符的问题。拖选期间在窗口级跟踪指针，停在终端上下边缘或移出边缘时每 40ms 滚动历史并延伸选区，按越界距离分级提速；松开、返回内部或到达历史边界后停止。
+
+补充自动滚动速度、历史上下界、反向选择及首列复制的回归测试，同步用户手册、架构说明和手写更新摘要；将 Syncthing 的 .stignore、.stfolder 加入忽略规则。
+
+验证：cargo fmt --all -- --check；cargo test --locked --no-default-features --all-targets（157 通过、0 失败、1 个专用 fixture ignored）；cargo check --locked --no-default-features --all-targets；python3 scripts/check_docs.py（22 份必需文档、241 个本地链接与锚点）；cargo check --locked --all-targets；cargo build --locked；git diff --check。macOS arm64 下 cargo run --locked 已启动并确认原生窗口可见。
+
+未执行拖选指针驱动或人工交互验收、Windows 实机及安装包验收；构建仍有既有弃用接口和未使用代码警告。
+```
+
+</details>
+
 ### 2026-10-17
 
 - **清理冗余品牌图标并精简资源生成** · [a261246](https://github.com/realmx/MantaSH/commit/a261246fef9b836aba326d70a6ba53cc28bbc302)
