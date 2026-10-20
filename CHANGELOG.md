@@ -97,6 +97,17 @@ MantaSH 首个公开产品版本，包含：
 
 ### 2026-10-20
 
+- **支持终端 Shift+单击延伸选区** · [deab9c5](https://github.com/realmx/MantaSH/commit/deab9c59afa87c6ddd03d6b7963f69c2b49251ed)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+保留已有选区的原始锚点和选区类型，Shift+单击更新终点并包含两端字符，后续拖动沿用边缘自动滚动；无有效选区时回退到新建选区。补充正反向、跨行、滚动、整词和空选区测试，并同步用户指南、架构说明和功能摘要。
+```
+
+</details>
+
 - **Merge pull request #4 from realmx/dependabot/cargo/russh-0.64.1** · [263de44](https://github.com/realmx/MantaSH/commit/263de44a1f71c392456a0c32af1f30094c295e0e)
 
 <details>
