@@ -96,6 +96,39 @@ MantaSH 首个公开产品版本，包含：
 
 ### 2026-10-20
 
+- **Merge pull request #4 from realmx/dependabot/cargo/russh-0.64.1** · [263de44](https://github.com/realmx/MantaSH/commit/263de44a1f71c392456a0c32af1f30094c295e0e)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+chore(deps): bump russh from 0.63.2 to 0.64.1
+```
+
+</details>
+
+- **chore(deps): bump russh from 0.63.2 to 0.64.1** · [744d33a](https://github.com/realmx/MantaSH/commit/744d33ac9299774461e94a4305b5c93a41245f3e)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+Bumps [russh](https://github.com/warp-tech/russh) from 0.63.2 to 0.64.1.
+- [Release notes](https://github.com/warp-tech/russh/releases)
+- [Commits](https://github.com/warp-tech/russh/compare/v0.63.2...v0.64.1)
+
+---
+updated-dependencies:
+- dependency-name: russh
+  dependency-version: 0.64.1
+  dependency-type: direct:production
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+```
+
+</details>
+
 - **修复终端反向拖选并支持边缘自动滚动** · [087810a](https://github.com/realmx/MantaSH/commit/087810a66b8c0b70ea5b2fdd8e20748271f82440)
 
 <details>
