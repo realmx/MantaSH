@@ -19,3 +19,4 @@ credentials.key
 # Syncthing
 .stignore
 .stfolder
+.stversions

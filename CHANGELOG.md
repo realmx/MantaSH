@@ -98,6 +98,30 @@ MantaSH 首个公开产品版本，包含：
 
 ### 2026-10-20
 
+- **更新日志改由提交前钩子维护** · [6084fe8](https://github.com/realmx/MantaSH/commit/6084fe8069cf3f84c7bbeb06ad45a945e6855012)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+用仓库内 .githooks/pre-commit 替代 .github/workflows/changelog.yml：每次提交前按 HEAD
+的完整可达历史重写 CHANGELOG.md 的逐次提交记录，并只把该文件暂存进同一提交，不再由
+Actions 在 push 后追加日志同步提交。删除 changelog.yml 和 publish 流程，新增
+scripts/install_hooks.sh 与跳过开关 MANTASH_SKIP_CHANGELOG。
+
+hook 覆盖 --amend（改为记录被修订提交的父提交）、首次提交、浅克隆、git commit <路径>
+的临时索引、CHANGELOG.md 未暂存修改和生成区内手改等边界；generate 改为按 HEAD 重写
+工作区日志，check 只验证工作区日志是否覆盖到 HEAD。同步更新 AGENTS.md、CONTRIBUTING.md、
+docs/development.md、docs/release.md、CHANGELOG.md 与 tests/test_changelog.py。
+
+验证：python3 -m unittest discover -s tests -p 'test_changelog.py'（16 项通过）；
+python3 -m unittest discover -s tests -p 'test_check_docs.py'（5 项通过）；
+python3 scripts/check_docs.py；python3 scripts/update_changelog.py check。
+未运行 Rust 检查，本次只改 Python 脚本、钩子与文档。
+```
+
+</details>
+
 - **支持终端 Shift+单击延伸选区** · [deab9c5](https://github.com/realmx/MantaSH/commit/deab9c59afa87c6ddd03d6b7963f69c2b49251ed)
 
 <details>
