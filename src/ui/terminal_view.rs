@@ -390,10 +390,17 @@ impl TerminalView {
         }
         self.selecting = true;
         self.drag_pointer = Some(event.position);
-        self.session
-            .terminal
-            .lock()
-            .select_start(col, row, event.click_count == 2);
+        // Shift+click extends a visible selection from its original anchor
+        // (holding the button keeps adjusting the end, with edge auto-scroll);
+        // without one it starts a new selection as a plain click would.
+        let extended =
+            event.modifiers.shift && self.session.terminal.lock().select_extend(col, row);
+        if !extended {
+            self.session
+                .terminal
+                .lock()
+                .select_start(col, row, event.click_count == 2);
+        }
         cx.notify();
     }
     /// Extend the drag selection to a window-space pointer; positions outside the

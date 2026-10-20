@@ -510,6 +510,25 @@ impl TerminalBuffer {
             self.revision = self.revision.wrapping_add(1);
         }
     }
+    /// Shift+click extension: keep the existing selection's anchor (the cell
+    /// where that selection was started by a click or drag, not whichever end is
+    /// nearer) and move its other end to this viewport cell, before or after the
+    /// anchor and across lines, including both end cells like [`Self::select_to`].
+    /// The selection type is kept, so a double-click word selection keeps
+    /// expanding to whole words. Returns false, changing nothing, when there is
+    /// no visible selection (none, an empty click point, or one scrolled out of
+    /// history), so the caller can start a new selection instead.
+    pub fn select_extend(&mut self, col: usize, row: usize) -> bool {
+        let visible = self
+            .term
+            .selection
+            .as_ref()
+            .is_some_and(|s| s.to_range(&self.term).is_some());
+        if visible {
+            self.select_to(col, row);
+        }
+        visible
+    }
     /// Auto-scroll an active drag selection by `lines` (positive toward history)
     /// and move its end to the viewport cell under the pointer. Returns false,
     /// leaving the selection unchanged, when there is no selection or the

@@ -465,3 +465,91 @@ fn reverse_drag_selection_includes_the_first_column_and_the_anchor_cell() {
     let text = term.selected_text().unwrap();
     assert_eq!(text, "23x\n24x\n25x\n26x\n27x\n28x\n29x");
 }
+
+#[test]
+fn shift_click_extends_selection_from_the_original_anchor() {
+    let mut term = TerminalBuffer::new(Encoding::Utf8);
+    term.resize(20, 5);
+    term.feed(b"[INFO] alpha\r\n[WARN] bravo\r\n#3 charlie");
+
+    // Extending forward on the same line keeps the anchor and includes the clicked cell.
+    term.select_start(7, 0, false);
+    term.select_to(8, 0);
+    assert_eq!(term.selected_text().unwrap(), "al");
+    assert!(term.select_extend(11, 0));
+    assert_eq!(term.selected_text().unwrap(), "alpha");
+
+    // Extending backward past the anchor flips the range around the same
+    // anchor cell and includes column 0.
+    assert!(term.select_extend(0, 0));
+    assert_eq!(term.selected_text().unwrap(), "[INFO] a");
+
+    // Extending across lines, after and then before a selection drawn
+    // bottom-to-top: the drag start (anchor 'b' of "bravo") stays fixed.
+    term.select_start(7, 1, false);
+    term.select_to(1, 1);
+    assert_eq!(term.selected_text().unwrap(), "WARN] b");
+    assert!(term.select_extend(4, 2));
+    assert_eq!(term.selected_text().unwrap(), "bravo\n#3 ch");
+    assert!(term.select_extend(2, 0));
+    assert_eq!(term.selected_text().unwrap(), "NFO] alpha\n[WARN] b");
+
+    // Shift+click then drag keeps moving the same end.
+    term.select_to(5, 1);
+    assert_eq!(term.selected_text().unwrap(), "] b");
+
+    // Extension survives scrolling: the anchor follows its content into history.
+    term.select_start(0, 2, false);
+    term.select_to(1, 2);
+    for line in 0..6 {
+        term.feed(format!("\r\nnew{line}").as_bytes());
+    }
+    term.scroll(3);
+    assert_eq!(term.term.grid().display_offset(), 3);
+    // Viewport row 0 now shows "[WARN] bravo"; the anchor '#' is on row 1.
+    assert!(term.select_extend(7, 0));
+    assert_eq!(term.selected_text().unwrap(), "bravo\n#");
+}
+
+#[test]
+fn shift_click_extension_keeps_word_granularity() {
+    let mut term = TerminalBuffer::new(Encoding::Utf8);
+    term.resize(30, 5);
+    term.feed(b"one two three\r\nfour five six");
+
+    // Double-click "two", then Shift+click inside "five" and before the anchor.
+    term.select_start(5, 0, true);
+    assert_eq!(term.selected_text().unwrap(), "two");
+    assert!(term.select_extend(6, 1));
+    assert_eq!(term.selected_text().unwrap(), "two three\nfour five");
+    assert!(term.select_extend(1, 0));
+    assert_eq!(term.selected_text().unwrap(), "one two");
+}
+
+#[test]
+fn shift_click_without_a_visible_selection_is_a_fallback() {
+    let mut term = TerminalBuffer::new(Encoding::Utf8);
+    term.resize(20, 5);
+    term.feed(b"hello world");
+
+    // No selection at all.
+    assert!(!term.select_extend(4, 0));
+    assert!(term.selected_text().is_none());
+
+    // A plain click without dragging leaves only an empty anchor point.
+    term.select_start(2, 0, false);
+    assert!(!term.select_extend(8, 0));
+    assert!(term.selected_text().is_none());
+
+    // Cleared selection (e.g. click-to-move-cursor).
+    term.select_start(0, 0, false);
+    term.select_to(4, 0);
+    term.clear_selection();
+    assert!(!term.select_extend(8, 0));
+    assert!(term.selected_text().is_none());
+
+    // The caller's fallback starts a fresh selection at the Shift+click.
+    term.select_start(6, 0, false);
+    term.select_to(10, 0);
+    assert_eq!(term.selected_text().unwrap(), "world");
+}
