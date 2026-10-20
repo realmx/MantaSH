@@ -31,11 +31,23 @@ git push origin master
 
 [CHANGELOG.md](../CHANGELOG.md) 包含人工维护的功能摘要与完整逐次提交记录。后者由 [update_changelog.py](../scripts/update_changelog.py) 从当前分支的全部可达 Git 历史生成，保留标题、完整正文、提交日期与链接，包含合并、空提交、文档提交和同一 push 中的每条提交；不依据标题前缀筛除变更。现有历史从仓库重建提交开始，不推断更早记录；提交原文也不代表发布或平台验收成功。
 
-每次 push 到 `master`（含 PR 合并）触发 [Update changelog](../.github/workflows/changelog.yml)。workflow 使用完整历史，在隔离检出中更新自动区、验证文档，再用自身 `GITHUB_TOKEN` 非强制推送一个仅修改 `CHANGELOG.md` 的同步提交。人工摘要与本地工作区不由生成器改写；自动区不手工编辑。机器人提交带 `MantaSH-Changelog: generated` 尾注，且只有单亲、仅改日志的这类提交才从生成结果中排除。
+日志由仓库内的提交前钩子 [.githooks/pre-commit](../.githooks/pre-commit) 在本地维护，不再由 Actions 推送额外的同步提交。每个克隆启用一次：
 
-任务按仓库串行运行；遇到并发 push 时，重新取得最新 `master` 并生成，最多尝试三次。无变化不提交；权限或分支规则拒绝时保留错误并失败，不切换凭据或强制推送。`GITHUB_TOKEN` 的同步 push 不递归触发 workflow，也不分配版本或派发 Release；源码发布仍由原始 push 的版本流程处理。手动重跑 Update changelog 可补齐失败的同步。
+```sh
+git config core.hooksPath .githooks
+```
 
-自动写回发生在提交推送到 `master` 之后。继续本地开发前拉取机器人新增的文档提交；仅在本地尚未推送的提交、其它开发分支可手动预览：
+也可运行 `sh scripts/install_hooks.sh`，它同时补上钩子的可执行权限。启用后每次 `git commit` 前，钩子调用 `update_changelog.py hook`，按 `HEAD` 的完整历史重写 `CHANGELOG.md` 自动区并把该文件暂存进同一提交，不暂存其它文件，也不产生额外提交。提交无法包含自身哈希，因此日志覆盖到本次提交的上一提交，最新一条在下一次提交时补入；推送后远端日志总比 `master` 少最后一条，属于预期。`commit -a`、解决冲突后用 `git commit` 完成的合并同样经过钩子；`commit --amend` 时日志改为覆盖被修订提交的父提交（钩子从 git 进程参数识别 `--amend`，经别名调用无法识别时会暂留修订前的提交，下一次提交自动纠正）。无冲突的 `git merge` 与 rebase 重放不运行 pre-commit，此后第一次普通提交会按完整历史补齐。
+
+边界处理：
+
+- 首次提交尚无 `HEAD`，钩子跳过，第二次提交开始记录。
+- 浅克隆只打印警告并跳过，不阻止提交，也不把截断的历史写成完整日志；`git fetch --unshallow` 后恢复。
+- `git commit <路径>` 使用临时索引，钩子打印警告并跳过，避免真实索引留下反向改动；下一次普通提交补齐。
+- `CHANGELOG.md` 有未暂存修改时，只替换索引和工作区中的自动区，人工的未暂存修改仍不进入本次提交；若未暂存修改落在自动区内，钩子拒绝提交并提示先暂存、贮藏或丢弃。
+- 临时跳过：`MANTASH_SKIP_CHANGELOG=1 git commit ...`。未启用钩子或跳过的提交不会丢失，之后任一启用钩子的提交都会按完整历史重新生成。
+
+人工摘要不由生成器改写；自动区不手工编辑。旧版 Actions 留下的同步提交带 `MantaSH-Changelog: generated` 尾注，只有单亲、仅改日志的这类提交仍从生成结果中排除。CI 不检查日志是否最新：跳过钩子或多提交推送时远端日志本就可能落后，下一次启用钩子的提交即可补齐。手动预览与检查：
 
 ```sh
 python3 scripts/update_changelog.py generate
@@ -43,7 +55,7 @@ python3 scripts/update_changelog.py check
 python3 -m unittest discover -s tests -p 'test_changelog.py'
 ```
 
-`generate --output <文件>` 只输出预览，不替换仓库日志；`check` 仅检查已提交历史是否完整，不写文件。浅克隆须先取得完整历史，生成器不会把截断的历史写成完整日志。提交正文应说明实际行为、原因和已执行验证；自动记录不能替代人工补充历史提交中未写明的功能摘要。
+`generate` 按当前 `HEAD` 重写工作区日志但不暂存；`generate --output <文件>` 只输出预览，不替换仓库日志；`check` 仅检查工作区日志是否已覆盖到当前 `HEAD`（即下一次提交将写入的内容），不写文件。浅克隆须先取得完整历史，生成器不会把截断的历史写成完整日志。提交正文应说明实际行为、原因和已执行验证；自动记录不能替代人工补充历史提交中未写明的功能摘要。
 
 ## 正式产物
 

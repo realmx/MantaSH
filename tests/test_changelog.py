@@ -1,7 +1,8 @@
-"""Deterministic changelogs and safe publication against real temporary Git repos."""
+"""Deterministic changelogs and the pre-commit hook against real temporary Git repos."""
 from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -28,9 +29,6 @@ class ChangelogTests(unittest.TestCase):
         self.git("config", "commit.gpgSign", "false")
         (self.repo / "CHANGELOG.md").write_text("# 更新日志\n\n人工摘要。\n", encoding="utf-8")
         (self.repo / "source.txt").write_text("initial\n")
-        # Publisher validation is exercised with a repository-owned successful checker.
-        (self.repo / "scripts").mkdir()
-        (self.repo / "scripts/check_docs.py").write_text("raise SystemExit(0)\n")
         self.first = self.commit("初始版本", "保留完整正文。\n第二行说明。")
 
     def git(self, *args, root=None):
@@ -48,16 +46,22 @@ class ChangelogTests(unittest.TestCase):
         self.git(*args, root=root)
         return self.git("rev-parse", "HEAD", root=root)
 
-    def remote(self):
-        remote = self.base / "remote.git"
-        self.git("init", "--bare", "-q", str(remote))
-        self.git("remote", "add", "origin", str(remote))
-        self.git("push", "-q", "origin", "master")
-        return remote
+    def install_hook(self, root=None):
+        """Use the repository's own hook and generator, as core.hooksPath does."""
+        root = root or self.repo
+        for name in (".githooks/pre-commit", "scripts/update_changelog.py", "scripts/check_docs.py"):
+            (root / name).parent.mkdir(exist_ok=True)
+            shutil.copy2(ROOT / name, root / name)
+        self.git("config", "core.hooksPath", ".githooks", root=root)
 
-    def assert_no_extra_worktrees(self):
-        listing = self.git("worktree", "list", "--porcelain")
-        self.assertEqual(sum(line.startswith("worktree ") for line in listing.splitlines()), 1)
+    def run_hook(self, **env):
+        clean = {key: value for key, value in os.environ.items()
+                 if not key.startswith("GIT_") and key != changelog.SKIP_ENV}
+        with patch.dict(os.environ, {**clean, **env}, clear=True), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            return changelog.hook(self.repo)
+
+    def committed_paths(self, sha):
+        return self.git("diff-tree", "--root", "--no-commit-id", "--name-only", "-r", sha).splitlines()
 
     def test_complete_history_includes_merged_empty_and_documentation_commits(self):
         self.git("checkout", "-qb", "topic")
@@ -162,88 +166,112 @@ class ChangelogTests(unittest.TestCase):
         self.assertEqual(changelog.commits(empty), [])
         self.assertIn("尚无提交记录", changelog.render("# 更新日志\n", []))
 
-    def test_publish_is_idempotent_and_preserves_caller_worktree_and_index(self):
-        remote = self.remote()
-        (self.repo / "source.txt").write_text("staged user edit\n")
+    def test_hook_commits_log_of_parent_history_without_extra_commits(self):
+        self.install_hook()
+        second = self.commit("启用提交前钩子")
+        self.assertIn("CHANGELOG.md", self.committed_paths(second))
+        text = self.git("show", f"{second}:CHANGELOG.md")
+        self.assertIn(changelog.COMMIT_URL + self.first, text)
+        self.assertNotIn(second, text)
+        (self.repo / "source.txt").write_text("third\n")
+        (self.repo / "untracked.txt").write_text("not staged by the hook\n")
         self.git("add", "source.txt")
-        (self.repo / "source.txt").write_text("unstaged user edit\n")
-        before_status, before_index = self.git("status", "--porcelain"), self.git("write-tree")
-        before_log = (self.repo / "CHANGELOG.md").read_bytes()
-        with redirect_stdout(StringIO()):
-            self.assertTrue(changelog.publish(self.repo))
-            head = self.git("rev-parse", "master", root=remote)
-            self.assertFalse(changelog.publish(self.repo))
-        self.assertEqual(self.git("rev-parse", "master", root=remote), head)
-        self.assertEqual(self.git("status", "--porcelain"), before_status)
-        self.assertEqual(self.git("write-tree"), before_index)
-        self.assertEqual((self.repo / "CHANGELOG.md").read_bytes(), before_log)
-        self.assertEqual((self.repo / "source.txt").read_text(), "unstaged user edit\n")
-        self.assertIn(self.first, self.git("show", "master:CHANGELOG.md", root=remote))
-        self.assertEqual(self.git("diff-tree", "--no-commit-id", "--name-only", "-r", head, root=remote), "CHANGELOG.md")
-        self.assert_no_extra_worktrees()
+        self.git("commit", "-qm", "第三次提交")
+        third = self.git("rev-parse", "HEAD")
+        self.assertEqual(sorted(self.committed_paths(third)), ["CHANGELOG.md", "source.txt"])
+        text = self.git("show", f"{third}:CHANGELOG.md")
+        for sha in (self.first, second):
+            self.assertEqual(text.count(changelog.COMMIT_URL + sha), 1)
+        self.assertNotIn(third, text)
+        self.assertEqual(self.git("rev-list", "--count", "HEAD"), "3")
+        self.assertEqual(self.git("status", "--porcelain"), "?? untracked.txt")
 
-    def test_publish_regenerates_after_a_real_non_fast_forward_race(self):
-        remote = self.remote()
-        other = self.base / "other"
-        self.git("clone", "--quiet", "--branch", "master", str(remote), str(other))
-        self.git("config", "user.name", "Other", root=other)
-        self.git("config", "user.email", "other@example.test", root=other)
-        self.git("config", "commit.gpgSign", "false", root=other)
-        original_git = changelog.git
-        pushed = []
-        concurrent = []
+    def test_hook_skips_initial_commit_and_explicit_opt_out(self):
+        empty = self.base / "empty"
+        empty.mkdir()
+        self.git("init", "-q", "-b", "master", root=empty)
+        self.git("config", "user.name", "Changelog Test", root=empty)
+        self.git("config", "user.email", "changelog@example.test", root=empty)
+        self.install_hook(empty)
+        (empty / "CHANGELOG.md").write_text("# 更新日志\n")
+        initial = self.commit("初始提交", root=empty)
+        self.assertEqual(self.git("show", f"{initial}:CHANGELOG.md", root=empty), "# 更新日志")
+        before = (self.repo / "CHANGELOG.md").read_bytes()
+        self.assertFalse(self.run_hook(**{changelog.SKIP_ENV: "1"}))
+        self.assertEqual((self.repo / "CHANGELOG.md").read_bytes(), before)
+        self.install_hook()
+        self.git("add", "--all")
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "跳过日志"], check=True,
+                       env={**os.environ, changelog.SKIP_ENV: "1"}, capture_output=True)
+        self.assertNotIn("CHANGELOG.md", self.committed_paths(self.git("rev-parse", "HEAD")))
 
-        def race(root, *args, **kwargs):
-            if args[:1] == ("push",):
-                pushed.append(args)
-                if len(pushed) == 1:
-                    (other / "concurrent.txt").write_text("keep this change\n")
-                    concurrent.append(self.commit("并发更新", root=other))
-                    self.git("push", "--quiet", "origin", "master", root=other)
-            return original_git(root, *args, **kwargs)
+    def test_hook_keeps_unstaged_manual_edits_out_of_the_commit(self):
+        self.assertTrue(self.run_hook())
+        self.commit("记录日志")
+        path = self.repo / "CHANGELOG.md"
+        path.write_text(path.read_text().replace("人工摘要。", "人工摘要。\n\n未暂存的补充。"))
+        (self.repo / "source.txt").write_text("staged\n")
+        self.git("add", "source.txt")
+        self.assertTrue(self.run_hook())
+        staged = self.git("show", ":CHANGELOG.md")
+        self.assertIn(self.git("rev-parse", "HEAD"), staged)
+        self.assertNotIn("未暂存的补充。", staged)
+        self.assertIn("未暂存的补充。", path.read_text())
+        self.assertEqual(sorted(self.git("diff", "--cached", "--name-only").splitlines()), ["CHANGELOG.md", "source.txt"])
+        unstaged = self.git("diff", "--", "CHANGELOG.md")
+        self.assertEqual([line for line in unstaged.splitlines() if line[:1] in "+-" and line[:3] not in ("+++", "---")],
+                         ["+未暂存的补充。", "+"])
 
-        with patch.object(changelog, "git", side_effect=race), redirect_stdout(StringIO()):
-            self.assertTrue(changelog.publish(self.repo))
-        self.assertEqual(len(pushed), 2)
-        self.assertTrue(all(args == ("push", "origin", "HEAD:refs/heads/master") for args in pushed))
-        text = self.git("show", "master:CHANGELOG.md", root=remote)
-        self.assertIn(self.first, text)
-        self.assertIn(concurrent[0], text)
-        self.assertEqual(self.git("show", "master:concurrent.txt", root=remote), "keep this change")
-        self.assert_no_extra_worktrees()
+    def test_hook_refuses_unstaged_edits_inside_generated_section(self):
+        self.assertTrue(self.run_hook())
+        self.commit("记录日志")
+        path = self.repo / "CHANGELOG.md"
+        edited = path.read_text().replace("## 逐次提交记录（自动生成）", "## 手改的生成区")
+        path.write_text(edited)
+        index = self.git("write-tree")
+        with self.assertRaisesRegex(ValueError, "inside the generated commit log"):
+            self.run_hook()
+        self.assertEqual(path.read_text(), edited)
+        self.assertEqual(self.git("write-tree"), index)
 
-    def test_rejected_push_preserves_remote_and_cleans_only_owned_checkout(self):
-        remote = self.remote()
-        hook = remote / "hooks/pre-receive"
-        hook.write_text("#!/bin/sh\nprintf 'test policy rejection\\n' >&2\nexit 1\n")
-        hook.chmod(0o755)
-        before = self.git("rev-parse", "master", root=remote)
-        with redirect_stdout(StringIO()), self.assertRaisesRegex(RuntimeError, "test policy rejection"):
-            changelog.publish(self.repo)
-        self.assertEqual(self.git("rev-parse", "master", root=remote), before)
+    def test_hook_skips_shallow_clones_and_path_commits_without_blocking(self):
+        self.commit("第二条提交")
+        shallow = self.base / "shallow"
+        self.git("clone", "--quiet", "--depth=1", self.repo.as_uri(), str(shallow))
+        before = (shallow / "CHANGELOG.md").read_bytes()
+        with patch.object(self, "repo", shallow):
+            self.assertFalse(self.run_hook())
+        self.assertEqual((shallow / "CHANGELOG.md").read_bytes(), before)
+        self.install_hook()
+        self.commit("启用钩子")
+        (self.repo / "source.txt").write_text("only this path\n")
+        self.git("commit", "-qm", "仅提交指定路径", "source.txt")
+        self.assertEqual(self.committed_paths(self.git("rev-parse", "HEAD")), ["source.txt"])
         self.assertEqual(self.git("status", "--porcelain"), "")
-        self.assert_no_extra_worktrees()
 
-    def test_failed_document_validation_cannot_publish(self):
-        remote = self.remote()
-        before = self.git("rev-parse", "master", root=remote)
-        with patch.object(changelog, "validate_documents", side_effect=ValueError("broken docs")), redirect_stdout(StringIO()):
-            with self.assertRaisesRegex(ValueError, "broken docs"):
-                changelog.publish(self.repo)
-        self.assertEqual(self.git("rev-parse", "master", root=remote), before)
-        self.assert_no_extra_worktrees()
+    def test_amend_logs_parents_instead_of_the_replaced_commit(self):
+        self.install_hook()
+        second = self.commit("启用钩子")
+        (self.repo / "source.txt").write_text("draft\n")
+        third = self.commit("待修订")
+        (self.repo / "source.txt").write_text("amended\n")
+        self.git("add", "source.txt")
+        self.git("commit", "-q", "--amend", "-m", "已修订")
+        amended = self.git("rev-parse", "HEAD")
+        text = self.git("show", f"{amended}:CHANGELOG.md")
+        self.assertIn(changelog.COMMIT_URL + second, text)
+        self.assertNotIn(third, text)
+        self.assertEqual(self.git("status", "--porcelain"), "")
 
-    def test_verbatim_commit_examples_do_not_block_publication(self):
+    def test_verbatim_commit_examples_are_recorded_by_the_hook(self):
         body = "示例：\n \techo ok\n保留末尾空格。  \n<<<<<<< example\n=======\n>>>>>>> example\n"
         self.git("commit", "--allow-empty", "--cleanup=verbatim", "-qm", "记录原始代码示例", "-m", body)
         source = self.git("rev-parse", "HEAD")
-        remote = self.remote()
-        with redirect_stdout(StringIO()):
-            self.assertTrue(changelog.publish(self.repo))
-        text = self.git("show", "master:CHANGELOG.md", root=remote)
+        self.assertTrue(self.run_hook())
+        text = self.git("show", ":CHANGELOG.md")
         self.assertIn(source, text)
         self.assertIn(body.rstrip("\n"), text)
-        self.assert_no_extra_worktrees()
+        self.assertFalse(self.run_hook())
 
 
 if __name__ == "__main__":

@@ -46,7 +46,7 @@ cargo build --locked
 
 文档检查器验证必需文件、仓库内链接和 Markdown 章节锚点，并检查许可证清单及界面文案键。修改该脚本时运行 `python3 -m unittest discover -s tests -p 'test_check_docs.py'`；CI 同时运行此测试与文档检查。
 
-更新日志生成器和同步 workflow 的改动运行 `python3 -m unittest discover -s tests -p 'test_changelog.py'`。此测试在临时 Git 仓库和本地远端中验证完整历史、合并、手写摘要保护、重复执行、并发 push 与拒绝推送；不连接正式远端。自动日志生成、完整历史要求及失败重跑见[更新日志维护规则](release.md#更新日志自动生成)。
+更新日志生成器和提交前钩子的改动运行 `python3 -m unittest discover -s tests -p 'test_changelog.py'`。此测试在临时 Git 仓库中验证完整历史、合并、手写摘要保护、重复执行，以及钩子的随提交暂存、首次提交、浅克隆、指定路径提交、未暂存修改和跳过开关；不连接远端。钩子启用方式与完整规则见[更新日志维护规则](release.md#更新日志自动生成)。
 
 ## 按变更选择验证
 

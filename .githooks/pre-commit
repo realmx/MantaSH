@@ -1,0 +1,29 @@
+#!/bin/sh
+# MantaSH pre-commit hook: regenerate the auto-generated commit log in
+# CHANGELOG.md from HEAD history and stage it into the commit being created.
+# Enable once per clone: git config core.hooksPath .githooks
+# Skip once: MANTASH_SKIP_CHANGELOG=1 git commit ...
+# Rules and edge cases: docs/release.md#更新日志自动生成
+
+if [ "${MANTASH_SKIP_CHANGELOG:-}" = "1" ]; then
+    echo "Changelog: skipped (MANTASH_SKIP_CHANGELOG=1)."
+    exit 0
+fi
+
+root=$(git rev-parse --show-toplevel) || exit 1
+script="$root/scripts/update_changelog.py"
+if [ ! -f "$script" ]; then
+    exit 0
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Warning: python3 not found; changelog not updated." >&2
+    exit 0
+fi
+
+# pre-commit has no amend flag; git runs this hook directly, so read its args.
+amend=
+case " $(ps -o command= -p "$PPID" 2>/dev/null) " in
+    *" --amend "*) amend=--amend ;;
+esac
+
+PYTHONDONTWRITEBYTECODE=1 exec python3 "$script" hook --root "$root" $amend
