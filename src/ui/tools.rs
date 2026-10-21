@@ -1089,10 +1089,24 @@ impl Workbench {
         let name_header = estimate_text_width(self.t("name"), ui);
         let size_w =
             (72. * ui / 14. + pane.files.size_extra).max(estimate_text_width(self.t("size"), ui));
-        // Fixed-width digits sample: every formatted mtime has this shape, so the
-        // column fits its widest value (or its header) without clipping.
-        let modified_w = estimate_text_width("0000-00-00 00:00:00", ui)
-            .max(estimate_text_width(self.t("modified"), ui));
+        // Every formatted mtime has the template's shape. Width comes from the UI
+        // font's real glyph advances (each digit slot takes the widest digit), so
+        // the column hugs its text; SPACE_SMALL absorbs sub-pixel rounding.
+        let modified_w = {
+            let text = cx.text_system();
+            let font_id = text.resolve_font(&gpui::font(self.prefs.ui_font.clone()));
+            crate::layout::fitted_column_width(
+                "0000-00-00 00:00:00",
+                self.t("modified"),
+                ui,
+                theme::SPACE_SMALL,
+                |ch| {
+                    text.advance(font_id, px(ui), ch)
+                        .ok()
+                        .map(|size| f32::from(size.width))
+                },
+            )
+        };
         let action_size = (ui + 6.).clamp(20., 26.);
         let action_w = action_size * 4. + theme::SPACE_SMALL * 3.;
         let panel = f32::from(pane.files.scroll.bounds().size.width);

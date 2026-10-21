@@ -156,3 +156,59 @@ pub fn tool_width(preferred: Option<f32>, window_width: f32, work_width: f32) ->
         .unwrap_or(minimum)
         .clamp(minimum, maximum)
 }
+
+/// Fallback advance, in ems, when the UI font cannot report a glyph. Calibrated on the wide
+/// side against the macOS system UI font at 14px, where `2024-09-29 23:09:01` renders about
+/// 142px wide (≈0.6em digits); the real file list measures glyphs and rarely needs this.
+pub fn fallback_char_em(ch: char) -> f32 {
+    match ch {
+        '0'..='9' => 0.6,
+        '-' | ':' | '.' | '/' => 0.4,
+        ' ' => 0.3,
+        c if c.is_ascii() => 0.6,
+        _ => 1.,
+    }
+}
+
+/// Single-line width of `text` from the font's per-character advances.
+///
+/// `advance` returns the measured advance in pixels, or `None` when the glyph is unavailable,
+/// in which case [`fallback_char_em`] is used. Every `'0'` in `template` stands for any digit
+/// and takes the widest measured digit, so proportional digit fonts never overflow the result.
+pub fn template_text_width(
+    template: &str,
+    font_size: f32,
+    mut advance: impl FnMut(char) -> Option<f32>,
+) -> f32 {
+    let mut measure = |ch: char| {
+        advance(ch)
+            .filter(|width| width.is_finite() && *width >= 0.)
+            .unwrap_or(fallback_char_em(ch) * font_size)
+    };
+    let digit = ('0'..='9').map(&mut measure).fold(0., f32::max);
+    template
+        .chars()
+        .map(|ch| if ch == '0' { digit } else { measure(ch) })
+        .sum()
+}
+
+/// Width of a one-line column showing `template`-shaped values under `header`, plus `margin`.
+pub fn fitted_column_width(
+    template: &str,
+    header: &str,
+    font_size: f32,
+    margin: f32,
+    mut advance: impl FnMut(char) -> Option<f32>,
+) -> f32 {
+    let values = template_text_width(template, font_size, &mut advance);
+    // Labels contain literal characters only; a `'0'` there is never a digit slot.
+    let label: f32 = header
+        .chars()
+        .map(|ch| {
+            advance(ch)
+                .filter(|width| width.is_finite() && *width >= 0.)
+                .unwrap_or(fallback_char_em(ch) * font_size)
+        })
+        .sum();
+    values.max(label) + margin
+}

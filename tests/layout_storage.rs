@@ -1,6 +1,6 @@
 use mantash::{
     encoding::Encoding,
-    layout::{PaneLayout, tool_width},
+    layout::{PaneLayout, fallback_char_em, fitted_column_width, template_text_width, tool_width},
     model::*,
     storage::Database,
 };
@@ -93,4 +93,40 @@ fn window_constraints_do_not_overwrite_saved_widths() {
     // remains the value restored after reopening the sidebar.
     assert_eq!(tool_width(None, 1280., 1238.), 280.);
     assert_eq!(tool_width(None, 960., 942.), 280.);
+}
+
+#[test]
+fn modified_column_width_hugs_measured_glyphs_and_never_undercuts_wide_digits() {
+    const TEMPLATE: &str = "0000-00-00 00:00:00";
+    // Proportional digits: '1' is narrow, '4' is the widest. Every slot takes the widest.
+    let advance = |ch: char| match ch {
+        '1' => Some(5.),
+        '4' => Some(8.5),
+        '0'..='9' => Some(7.8),
+        '-' | ':' => Some(4.2),
+        ' ' => Some(3.9),
+        _ => None,
+    };
+    let values = template_text_width(TEMPLATE, 14., advance);
+    assert!((values - (14. * 8.5 + 4. * 4.2 + 3.9)).abs() < 1e-3);
+    // A real value can never be wider than the template estimate.
+    let widest_value: f32 = "2044-04-04 04:44:44"
+        .chars()
+        .map(|c| advance(c).unwrap())
+        .sum();
+    assert!(widest_value <= values + 1e-3);
+    // The margin is added once; a wider header wins over the values.
+    assert!(
+        (fitted_column_width(TEMPLATE, "Modified", 14., 4., advance) - (values + 4.)).abs() < 1e-3
+    );
+    let wide_header = fitted_column_width(TEMPLATE, "长长长长长长长长长长", 14., 4., advance);
+    assert!((wide_header - (10. * 14. * fallback_char_em('长') + 4.)).abs() < 1e-3);
+    // Without glyph data the fallback is tighter than the old 0.6em-per-character estimate
+    // (19 × 8.4 + 7 = 166.6px at 14px) yet still covers the ~142px seen in the macOS UI font.
+    let fallback = fitted_column_width(TEMPLATE, "修改时间", 14., 4., |_| None);
+    assert!((fallback - (14. * 0.6 * 14. + 4. * 0.4 * 14. + 0.3 * 14. + 4.)).abs() < 1e-3);
+    assert!(fallback < 166.6 - 15. && fallback - 4. > 142.);
+    // Unusable measurements fall back instead of collapsing the column.
+    let broken = template_text_width(TEMPLATE, 14., |_| Some(f32::NAN));
+    assert!((broken - template_text_width(TEMPLATE, 14., |_| None)).abs() < 1e-3);
 }
