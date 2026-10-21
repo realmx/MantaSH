@@ -26,6 +26,32 @@ pub struct FileEntry {
     /// POSIX type and permission bits returned by this listing, if supplied by the server.
     pub permissions: Option<u32>,
 }
+/// Placeholder shown in the file list when the server did not report a modification time.
+pub const UNKNOWN_MODIFIED: &str = "—";
+
+/// Format an SFTP `mtime` (seconds since the Unix epoch) for the file list in local time.
+///
+/// SFTP v3 attributes carry `mtime` as an unsigned 32-bit second count; a missing value
+/// (the server omitted `ACMODTIME`) renders as [`UNKNOWN_MODIFIED`] instead of a guessed date.
+pub fn format_modified(mtime: Option<u32>) -> String {
+    format_modified_in(mtime, &chrono::Local)
+}
+
+/// [`format_modified`] for an explicit time zone, as `YYYY-MM-DD HH:mm:ss` (seconds shown, not rounded).
+pub fn format_modified_in<Tz>(mtime: Option<u32>, zone: &Tz) -> String
+where
+    Tz: chrono::TimeZone,
+    Tz::Offset: std::fmt::Display,
+{
+    mtime
+        .and_then(|seconds| chrono::DateTime::from_timestamp(i64::from(seconds), 0))
+        .map(|date| {
+            date.with_timezone(zone)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|| UNKNOWN_MODIFIED.into())
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stamp {
     pub hash: [u8; 32],
@@ -233,6 +259,27 @@ pub async fn rename(remote: &Remote, from: &str, to: &str) -> Result<()> {
     Ok(())
 }
 
+/// Build one listing row from the attributes the same READDIR reply carried.
+///
+/// Size, modification time and permission bits are copied as reported; a field the server
+/// omitted stays `None` so the list shows a placeholder rather than an invented value.
+pub fn listing_entry(
+    directory: &str,
+    name: String,
+    metadata: &russh_sftp::protocol::FileAttributes,
+) -> Result<FileEntry> {
+    let kind = metadata.file_type();
+    Ok(FileEntry {
+        path: join(directory, &name)?,
+        name,
+        directory: kind.is_dir(),
+        symlink: kind.is_symlink(),
+        size: metadata.size,
+        modified: metadata.mtime,
+        permissions: metadata.permissions,
+    })
+}
+
 /// Canonicalize the requested directory, preserving hidden files in the returned model.
 pub async fn list(remote: &Remote, path: &str) -> Result<(String, Vec<FileEntry>)> {
     let sftp = remote.sftp().await?;
@@ -246,17 +293,7 @@ pub async fn list(remote: &Remote, path: &str) -> Result<(String, Vec<FileEntry>
         if valid_name(&name).is_err() {
             continue;
         }
-        let metadata = entry.metadata();
-        let kind = metadata.file_type();
-        entries.push(FileEntry {
-            path: join(&directory, &name)?,
-            name,
-            directory: kind.is_dir(),
-            symlink: kind.is_symlink(),
-            size: metadata.size,
-            modified: metadata.mtime,
-            permissions: metadata.permissions,
-        });
+        entries.push(listing_entry(&directory, name, &entry.metadata())?);
     }
     entries.sort_by(|a, b| {
         b.directory

@@ -54,7 +54,7 @@ cargo build --locked
 
 | 变更范围 | 测试目标 | 重点 |
 |---|---|---|
-| 通用模型、编码、CSV | `core`、`import_monitor_boundaries` | 编码/BOM、二进制拒绝、跨包多字节、CSV 合并与边界输入 |
+| 通用模型、编码、CSV | `core`、`import_monitor_boundaries` | 编码/BOM、二进制拒绝、跨包多字节、CSV 合并与边界输入、文件列表 mtime 映射与时区格式化 |
 | 元数据与历史 | `metadata_commit`、`shared_history`、`history_migration`、`shell_history` | FIFO、request/revision、密码分阶段失败、格式 2 一致备份/事务失败、各列表稳定 UUID 去重、nonce 与重启 |
 | 凭据与 SSH/SFTP | `automatic_vault`、`ssh_sftp` | 主机确认先于凭据读取、认证后保存、错误密码保护、旧回复取消、真实 SFTP 文件及传输；`tests/support/credential_reconnect.rs` 由 `ssh_sftp` 引入 |
 | 终端 I/O、网格与输入 | `local_pty`、`terminal_updates`、`terminal_paint`、`local_terminal_clear`、`command_cursor`、`git_bash` | 真实 PTY、连续 resize/关闭、唤醒合并、damage 与完整帧逐格一致、局部复制、Unicode、清屏与滚动边界、提示符定位 |

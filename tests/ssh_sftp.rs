@@ -355,6 +355,13 @@ async fn copy_and_rename_preflight_preserve_targets_and_permissions() {
     let source = root.join("quote' $source.txt");
     std::fs::write(&source, b"original bytes").unwrap();
     std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_792_575_599);
+    std::fs::File::options()
+        .write(true)
+        .open(&source)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
     let target = root.join("target");
     std::fs::create_dir(&target).unwrap();
     let source_text = source.to_string_lossy().into_owned();
@@ -374,6 +381,15 @@ async fn copy_and_rename_preflight_preserve_targets_and_permissions() {
             .unwrap()
             & 0o777,
         0o640
+    );
+    // The listing row carries the server's READDIR mtime for the modified column.
+    assert_eq!(
+        entries
+            .iter()
+            .find(|entry| entry.path == source_text)
+            .unwrap()
+            .modified,
+        Some(1_792_575_599)
     );
     files::copy(&remote, &[selection.clone()], &target_text)
         .await

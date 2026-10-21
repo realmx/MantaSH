@@ -97,7 +97,7 @@ Unix 本地 PTY 使用单一非阻塞 I/O 循环：先排空旧宽度输出，�
 
 ## 文件、编辑与传输
 
-文件行事件携带 Owner 与目录 request；`file_selection` 只保存当前视图的完整路径、范围起点和键盘终点，不持久化。目录成功更换或刷新后清空选区；行按钮固定本行，批量确认固定路径集合。`ui/file_actions.rs` 用 `FileSnapshot` 与独立操作 UUID 分开处理目录和操作回执。复制来源限制同一 Owner/attempt，可导航到目标目录；重命名与关联读取/保存互斥，成功更新文档路径且只刷新仍匹配的目录。后端复核类型、包含关系和冲突，复制依赖远端 POSIX `cp`。
+目录列表由 `files::listing_entry` 从同一 READDIR 回复的属性复制类型、大小、mtime 与权限，缺失字段保持 `None`，不为每行另发 stat；界面经 `files::format_modified` 把 mtime 按本机时区格式化为 `YYYY-MM-DD HH:mm:ss`，未知值显示“—”。文件行事件携带 Owner 与目录 request；`file_selection` 只保存当前视图的完整路径、范围起点和键盘终点，不持久化。目录成功更换或刷新后清空选区；行按钮固定本行，批量确认固定路径集合。`ui/file_actions.rs` 用 `FileSnapshot` 与独立操作 UUID 分开处理目录和操作回执。复制来源限制同一 Owner/attempt，可导航到目标目录；重命名与关联读取/保存互斥，成功更新文档路径且只刷新仍匹配的目录。后端复核类型、包含关系和冲突，复制依赖远端 POSIX `cp`。
 
 `Document` 固定原 Owner、文档 ID、路径、编码/BOM、内容基线和 revision；重连不重绑草稿。读取只接受最新 request，保存携带内容与版本快照，仅当前版本成功才清除 dirty。后端先严格编码并重新读取目标，确认仍为可读普通文件，再写同目录临时文件，以唯一恢复文件保护原内容后按最后保存覆盖；远端内容变化本身不拒绝保存，失败保留草稿和恢复路径。编辑器行列定位也先核对原 Owner/ID，再调用原生 `InputState`，不修改文本。
 

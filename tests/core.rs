@@ -420,3 +420,67 @@ fn completed_and_cancelled_transfers_reject_late_progress() {
     assert_eq!(task.state, TransferState::Cancelled);
     assert_eq!(task.bytes, 10);
 }
+
+#[test]
+fn file_list_mtime_shows_seconds_in_zone_and_unknown_is_a_placeholder() {
+    use chrono::{FixedOffset, Utc};
+    use mantash::files::{UNKNOWN_MODIFIED, format_modified, format_modified_in};
+    // 2026-10-21 09:39:59 UTC: seconds are shown as reported, not truncated or rounded.
+    let mtime = Some(1_792_575_599);
+    assert_eq!(format_modified_in(mtime, &Utc), "2026-10-21 09:39:59");
+    let shanghai = FixedOffset::east_opt(8 * 3600).unwrap();
+    assert_eq!(format_modified_in(mtime, &shanghai), "2026-10-21 17:39:59");
+    let west = FixedOffset::west_opt(5 * 3600).unwrap();
+    assert_eq!(format_modified_in(mtime, &west), "2026-10-21 04:39:59");
+    // The epoch and the largest SFTP v3 value are real timestamps, not unknown.
+    assert_eq!(format_modified_in(Some(0), &Utc), "1970-01-01 00:00:00");
+    assert_eq!(
+        format_modified_in(Some(u32::MAX), &Utc),
+        "2106-02-07 06:28:15"
+    );
+    assert_eq!(format_modified_in(None, &shanghai), UNKNOWN_MODIFIED);
+    assert_eq!(format_modified(None), UNKNOWN_MODIFIED);
+    // Local time keeps the same fixed `YYYY-MM-DD HH:mm:ss` shape the column width assumes.
+    let local = format_modified(mtime);
+    assert_eq!(local.len(), "0000-00-00 00:00:00".len());
+    assert!(
+        local
+            .chars()
+            .zip("0000-00-00 00:00:00".chars())
+            .all(|(c, shape)| {
+                if shape == '0' {
+                    c.is_ascii_digit()
+                } else {
+                    c == shape
+                }
+            })
+    );
+}
+
+#[test]
+fn listing_entry_carries_readdir_mtime_and_keeps_missing_attributes_unknown() {
+    use mantash::files::listing_entry;
+    use russh_sftp::protocol::FileAttributes;
+    let mut attributes = FileAttributes::empty();
+    attributes.set_regular(true);
+    attributes.size = Some(42);
+    attributes.mtime = Some(1_792_575_599);
+    attributes.permissions = Some(attributes.permissions.unwrap_or(0) | 0o640);
+    let entry = listing_entry("/srv/data/", "报告.txt".into(), &attributes).unwrap();
+    assert_eq!(entry.path, "/srv/data/报告.txt");
+    assert_eq!(entry.name, "报告.txt");
+    assert!(!entry.directory && !entry.symlink);
+    assert_eq!(entry.size, Some(42));
+    assert_eq!(entry.modified, Some(1_792_575_599));
+    assert_eq!(entry.permissions.unwrap() & 0o777, 0o640);
+
+    let mut directory = FileAttributes::empty();
+    directory.set_dir(true);
+    let entry = listing_entry("/srv", "logs".into(), &directory).unwrap();
+    assert!(entry.directory);
+    assert_eq!(entry.size, None);
+    assert_eq!(entry.modified, None);
+
+    // Names that cannot form a safe child path are still rejected.
+    assert!(listing_entry("/srv", "../escape".into(), &attributes).is_err());
+}

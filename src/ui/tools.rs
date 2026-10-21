@@ -1089,6 +1089,10 @@ impl Workbench {
         let name_header = estimate_text_width(self.t("name"), ui);
         let size_w =
             (72. * ui / 14. + pane.files.size_extra).max(estimate_text_width(self.t("size"), ui));
+        // Fixed-width digits sample: every formatted mtime has this shape, so the
+        // column fits its widest value (or its header) without clipping.
+        let modified_w = estimate_text_width("0000-00-00 00:00:00", ui)
+            .max(estimate_text_width(self.t("modified"), ui));
         let action_size = (ui + 6.).clamp(20., 26.);
         let action_w = action_size * 4. + theme::SPACE_SMALL * 3.;
         let panel = f32::from(pane.files.scroll.bounds().size.width);
@@ -1097,16 +1101,18 @@ impl Workbench {
         } else {
             theme::SPACE_PANEL
         };
-        let overhead = theme::SPACE_PANEL * 2. + 18. + action_gap;
+        // The modified column keeps the same gap before it as the actions column.
+        let overhead = theme::SPACE_PANEL * 2. + 18. + action_gap * 2.;
         let name_w = Some(
             pane.files
                 .name_extra
-                .unwrap_or((panel - size_w - action_w - overhead).max(140.))
+                .unwrap_or((panel - size_w - modified_w - action_w - overhead).max(140.))
                 .max(name_header),
         );
         let column_row = |prefix: &'static str,
                           name_cell: AnyElement,
                           second: SharedString,
+                          modified: SharedString,
                           trailing: bool,
                           actions: AnyElement|
          -> Div {
@@ -1114,7 +1120,11 @@ impl Workbench {
                 .flex()
                 .items_center()
                 .px(px(theme::SPACE_PANEL))
-                .min_w(px(name_w.unwrap() + size_w + action_w + overhead))
+                .min_w(px(name_w.unwrap()
+                    + size_w
+                    + modified_w
+                    + action_w
+                    + overhead))
                 .child(name_cell)
                 .child(
                     div()
@@ -1164,6 +1174,15 @@ impl Workbench {
                 .child(
                     div()
                         .ml(px(action_gap))
+                        .w(px(modified_w))
+                        .flex_shrink_0()
+                        .whitespace_nowrap()
+                        .text_color(p.muted)
+                        .child(modified),
+                )
+                .child(
+                    div()
+                        .ml(px(action_gap))
                         .w(px(action_w))
                         .flex_shrink_0()
                         .child(actions),
@@ -1190,6 +1209,7 @@ impl Workbench {
                 )
                 .into_any_element(),
             self.t("size").into(),
+            self.t("modified").into(),
             true,
             div().child(self.t("actions")).into_any_element(),
         )
@@ -1435,6 +1455,7 @@ impl Workbench {
                                                 )
                                                 .into_any_element(),
                                             size_label,
+                                            crate::files::format_modified(entry.modified).into(),
                                             false,
                                             actions,
                                         )
