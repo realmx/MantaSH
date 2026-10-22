@@ -117,16 +117,36 @@ fn modified_column_width_hugs_measured_glyphs_and_never_undercuts_wide_digits() 
     assert!(widest_value <= values + 1e-3);
     // The margin is added once; a wider header wins over the values.
     assert!(
-        (fitted_column_width(TEMPLATE, "Modified", 14., 4., advance) - (values + 4.)).abs() < 1e-3
+        (fitted_column_width(TEMPLATE, "Modified", 0., 14., 4., advance) - (values + 4.)).abs()
+            < 1e-3
     );
-    let wide_header = fitted_column_width(TEMPLATE, "长长长长长长长长长长", 14., 4., advance);
+    let wide_header = fitted_column_width(TEMPLATE, "长长长长长长长长长长", 0., 14., 4., advance);
     assert!((wide_header - (10. * 14. * fallback_char_em('长') + 4.)).abs() < 1e-3);
     // Without glyph data the fallback is tighter than the old 0.6em-per-character estimate
     // (19 × 8.4 + 7 = 166.6px at 14px) yet still covers the ~142px seen in the macOS UI font.
-    let fallback = fitted_column_width(TEMPLATE, "修改时间", 14., 4., |_| None);
+    let fallback = fitted_column_width(TEMPLATE, "修改时间", 0., 14., 4., |_| None);
     assert!((fallback - (14. * 0.6 * 14. + 4. * 0.4 * 14. + 0.3 * 14. + 4.)).abs() < 1e-3);
     assert!(fallback < 166.6 - 15. && fallback - 4. > 142.);
     // Unusable measurements fall back instead of collapsing the column.
     let broken = template_text_width(TEMPLATE, 14., |_| Some(f32::NAN));
     assert!((broken - template_text_width(TEMPLATE, 14., |_| None)).abs() < 1e-3);
+}
+
+#[test]
+fn sortable_header_chrome_widens_only_when_the_decorated_label_is_wider() {
+    const TEMPLATE: &str = "0000-00-00 00:00:00";
+    let advance = |ch: char| if ch.is_ascii() { Some(8.) } else { Some(14.) };
+    // Sort arrow slot (16px), its 8px gap and the 1px button borders.
+    let chrome = 16. + 8. + 2.;
+    let values = template_text_width(TEMPLATE, 14., advance);
+    // A short header plus its arrow still fits inside the timestamp width.
+    let modified = fitted_column_width(TEMPLATE, "修改时间", chrome, 14., 4., advance);
+    assert!((modified - (values + 4.)).abs() < 1e-3);
+    // A header-only column (size) is label + arrow chrome + margin, never less.
+    let size = fitted_column_width("", "大小", chrome, 14., 4., advance);
+    assert!((size - (2. * 14. + chrome + 4.)).abs() < 1e-3);
+    // A long translated header with its arrow wins over the values.
+    let long = fitted_column_width(TEMPLATE, "Last modified time", chrome, 14., 4., advance);
+    assert!((long - (18. * 8. + chrome + 4.)).abs() < 1e-3);
+    assert!(long > values + 4.);
 }

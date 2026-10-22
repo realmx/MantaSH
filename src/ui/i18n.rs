@@ -468,6 +468,10 @@ pub fn text(language: Language, key: &str) -> &'static str {
         ),
         "size" => ("大小", "Size"),
         "modified" => ("修改时间", "Modified"),
+        "file_sort" => (
+            "点击切换排序：降序、升序、默认顺序",
+            "Click to sort: descending, ascending, default order",
+        ),
         "terminal" => ("终端", "Terminal"),
         "unsaved" => ("未保存", "Unsaved"),
         "saving" => ("保存中…", "Saving…"),

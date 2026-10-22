@@ -193,9 +193,13 @@ pub fn template_text_width(
 }
 
 /// Width of a one-line column showing `template`-shaped values under `header`, plus `margin`.
+///
+/// `header_extra` is fixed chrome beside the header label (e.g. a sort arrow and its gap);
+/// it widens the column only when the decorated header is wider than the values.
 pub fn fitted_column_width(
     template: &str,
     header: &str,
+    header_extra: f32,
     font_size: f32,
     margin: f32,
     mut advance: impl FnMut(char) -> Option<f32>,
@@ -209,6 +213,7 @@ pub fn fitted_column_width(
                 .filter(|width| width.is_finite() && *width >= 0.)
                 .unwrap_or(fallback_char_em(ch) * font_size)
         })
-        .sum();
+        .sum::<f32>()
+        + header_extra;
     values.max(label) + margin
 }

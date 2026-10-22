@@ -484,3 +484,191 @@ fn listing_entry_carries_readdir_mtime_and_keeps_missing_attributes_unknown() {
     // Names that cannot form a safe child path are still rejected.
     assert!(listing_entry("/srv", "../escape".into(), &attributes).is_err());
 }
+
+fn sort_row(
+    name: &str,
+    directory: bool,
+    size: Option<u64>,
+    modified: Option<u32>,
+) -> mantash::files::FileEntry {
+    mantash::files::FileEntry {
+        name: name.into(),
+        path: format!("/srv/{name}"),
+        directory,
+        symlink: false,
+        size,
+        modified,
+        permissions: None,
+    }
+}
+
+fn sorted_names(
+    entries: &[mantash::files::FileEntry],
+    sort: mantash::files::FileSort,
+) -> Vec<String> {
+    let mut entries = entries.to_vec();
+    mantash::files::sort_entries(&mut entries, sort);
+    entries.into_iter().map(|entry| entry.name).collect()
+}
+
+#[test]
+fn file_sort_header_cycles_descending_ascending_then_default() {
+    use mantash::files::{FileSort, SortColumn};
+    let size_desc = FileSort::By {
+        column: SortColumn::Size,
+        descending: true,
+    };
+    let size_asc = FileSort::By {
+        column: SortColumn::Size,
+        descending: false,
+    };
+    assert_eq!(FileSort::default(), FileSort::Default);
+    assert_eq!(FileSort::Default.toggled(SortColumn::Size), size_desc);
+    assert_eq!(size_desc.toggled(SortColumn::Size), size_asc);
+    assert_eq!(size_asc.toggled(SortColumn::Size), FileSort::Default);
+    // Switching columns always starts the new column descending.
+    assert_eq!(
+        size_asc.toggled(SortColumn::Modified),
+        FileSort::By {
+            column: SortColumn::Modified,
+            descending: true
+        }
+    );
+    assert_eq!(size_desc.direction(SortColumn::Size), Some(true));
+    assert_eq!(size_asc.direction(SortColumn::Size), Some(false));
+    assert_eq!(size_desc.direction(SortColumn::Modified), None);
+    assert_eq!(FileSort::Default.direction(SortColumn::Size), None);
+}
+
+#[test]
+fn file_sort_keeps_folders_first_unknown_last_and_breaks_ties_by_name() {
+    use mantash::files::{FileSort, SortColumn};
+    let rows = vec![
+        sort_row("b.log", false, Some(10), Some(300)),
+        sort_row("Zeta", true, None, Some(100)),
+        sort_row("a.txt", false, Some(10), Some(200)),
+        sort_row("unknown.bin", false, None, None),
+        sort_row("alpha", true, None, None),
+        sort_row("big.iso", false, Some(9_000), Some(100)),
+        sort_row("Mid", true, None, Some(500)),
+        sort_row("c.md", false, Some(5), Some(300)),
+    ];
+    let by = |column, descending| FileSort::By { column, descending };
+    // Default: folders, then files, each case-insensitively by name.
+    assert_eq!(
+        sorted_names(&rows, FileSort::Default),
+        [
+            "alpha",
+            "Mid",
+            "Zeta",
+            "a.txt",
+            "b.log",
+            "big.iso",
+            "c.md",
+            "unknown.bin"
+        ]
+    );
+    // Size: folders have no size and keep name order; equal sizes fall back to name;
+    // the unknown size stays last in both directions.
+    assert_eq!(
+        sorted_names(&rows, by(SortColumn::Size, true)),
+        [
+            "alpha",
+            "Mid",
+            "Zeta",
+            "big.iso",
+            "a.txt",
+            "b.log",
+            "c.md",
+            "unknown.bin"
+        ]
+    );
+    assert_eq!(
+        sorted_names(&rows, by(SortColumn::Size, false)),
+        [
+            "alpha",
+            "Mid",
+            "Zeta",
+            "c.md",
+            "a.txt",
+            "b.log",
+            "big.iso",
+            "unknown.bin"
+        ]
+    );
+    // Modified: folders sort by time inside their group, unknown times last both ways.
+    assert_eq!(
+        sorted_names(&rows, by(SortColumn::Modified, true)),
+        [
+            "Mid",
+            "Zeta",
+            "alpha",
+            "b.log",
+            "c.md",
+            "a.txt",
+            "big.iso",
+            "unknown.bin"
+        ]
+    );
+    assert_eq!(
+        sorted_names(&rows, by(SortColumn::Modified, false)),
+        [
+            "Zeta",
+            "Mid",
+            "alpha",
+            "big.iso",
+            "a.txt",
+            "b.log",
+            "c.md",
+            "unknown.bin"
+        ]
+    );
+    // Resetting from any prior order restores exactly the default order.
+    let mut entries = rows.clone();
+    mantash::files::sort_entries(&mut entries, by(SortColumn::Modified, true));
+    mantash::files::sort_entries(&mut entries, FileSort::Default);
+    assert_eq!(
+        entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+        sorted_names(&rows, FileSort::Default)
+    );
+    // Case-only name differences resolve deterministically, independent of input order.
+    let twins = vec![
+        sort_row("readme", false, Some(1), None),
+        sort_row("README", false, Some(1), None),
+    ];
+    let mut reversed = twins.clone();
+    reversed.reverse();
+    assert_eq!(
+        sorted_names(&twins, by(SortColumn::Size, true)),
+        sorted_names(&reversed, by(SortColumn::Size, true))
+    );
+}
+
+#[test]
+fn file_sort_reorders_display_without_changing_path_selection_ranges() {
+    use mantash::file_selection::RowSelection;
+    use mantash::files::{FileSort, SortColumn};
+    let rows = vec![
+        sort_row("a", false, Some(3), None),
+        sort_row("b", false, Some(1), None),
+        sort_row("c", false, Some(2), None),
+    ];
+    let mut entries = rows.clone();
+    let visible = |entries: &[mantash::files::FileEntry]| {
+        entries.iter().map(|e| e.path.clone()).collect::<Vec<_>>()
+    };
+    let mut selection = RowSelection::default();
+    selection.click(&visible(&entries), "/srv/a", false, false);
+    mantash::files::sort_entries(
+        &mut entries,
+        FileSort::By {
+            column: SortColumn::Size,
+            descending: false,
+        },
+    );
+    // Identity survives the reorder; a Shift range then follows the displayed order b, c, a.
+    assert!(selection.contains("/srv/a"));
+    selection.click(&visible(&entries), "/srv/c", true, false);
+    assert!(selection.contains("/srv/c") && selection.contains("/srv/a"));
+    assert!(!selection.contains("/srv/b"));
+}

@@ -156,6 +156,10 @@ pub(super) struct FileTool {
     /// owns the slack, so every edge follows the classic right-widens gesture.
     name_extra: Option<f32>,
     size_extra: f32,
+    /// Header-chosen row order for this panel; in memory only, kept across refresh
+    /// and navigation. `entries` is stored in this order so selection ranges and
+    /// keyboard movement follow exactly what is displayed.
+    sort: crate::files::FileSort,
     /// Directory tree state: cached children, expanded set, and pending request.
     tree_children: std::collections::HashMap<String, Vec<(String, bool)>>,
     tree_expanded: std::collections::HashSet<String>,
@@ -977,6 +981,7 @@ impl Workbench {
                 scroll_x: ScrollHandle::new(),
                 name_extra: None,
                 size_extra: 0.,
+                sort: Default::default(),
                 tree_children: Default::default(),
                 tree_expanded: Default::default(),
                 tree_rows: Rc::new(Vec::new()),
@@ -1781,6 +1786,12 @@ impl Workbench {
                                 }
                                 pane.files.rebuild_tree_rows(ui_size);
                                 pane.files.entries = entries;
+                                if pane.files.sort != crate::files::FileSort::Default {
+                                    crate::files::sort_entries(
+                                        &mut pane.files.entries,
+                                        pane.files.sort,
+                                    );
+                                }
                                 pane.files.selected.clear();
                                 pane.files.error = None;
                                 loaded_ok = true;

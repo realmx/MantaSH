@@ -203,6 +203,22 @@ impl Workbench {
             cx.notify();
         }
     }
+    /// Cycle a header's order (descending, ascending, default) and reorder rows in place.
+    ///
+    /// Selection is keyed by path, so selected rows stay selected; later Shift ranges and
+    /// arrow keys read `visible_paths()`, which now follows the displayed order.
+    pub(super) fn toggle_file_sort(
+        &mut self,
+        owner: Owner,
+        column: crate::files::SortColumn,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(pane) = self.pane_mut(owner) {
+            pane.files.sort = pane.files.sort.toggled(column);
+            crate::files::sort_entries(&mut pane.files.entries, pane.files.sort);
+            cx.notify();
+        }
+    }
     /// Hiding files must also remove their batch targets and any hidden range pivot.
     pub(super) fn toggle_hidden_files(&mut self, owner: Owner, cx: &mut Context<Self>) {
         let ui = self.prefs.ui_size;
@@ -1087,25 +1103,65 @@ impl Workbench {
         }
         let ui = self.prefs.ui_size;
         let name_header = estimate_text_width(self.t("name"), ui);
-        let size_w =
-            (72. * ui / 14. + pane.files.size_extra).max(estimate_text_width(self.t("size"), ui));
+        // Sortable headers are chromeless buttons: an always-reserved arrow slot
+        // (the wrapper's icon size), the wrapper's 8px icon gap and its 1px
+        // borders sit beside the label, so the label never shifts or clips.
+        let sort_icon = (ui + 2.).min(20.);
+        let sort_chrome = sort_icon + theme::SPACE_CONTROL + 2.;
+        let text = cx.text_system().clone();
+        let font_id = text.resolve_font(&gpui::font(self.prefs.ui_font.clone()));
+        let advance = |ch: char| {
+            text.advance(font_id, px(ui), ch)
+                .ok()
+                .map(|size| f32::from(size.width))
+        };
+        let size_header = crate::layout::fitted_column_width(
+            "",
+            self.t("size"),
+            sort_chrome,
+            ui,
+            theme::SPACE_SMALL,
+            advance,
+        );
+        let size_w = (72. * ui / 14. + pane.files.size_extra).max(size_header);
         // Every formatted mtime has the template's shape. Width comes from the UI
         // font's real glyph advances (each digit slot takes the widest digit), so
         // the column hugs its text; SPACE_SMALL absorbs sub-pixel rounding.
-        let modified_w = {
-            let text = cx.text_system();
-            let font_id = text.resolve_font(&gpui::font(self.prefs.ui_font.clone()));
-            crate::layout::fitted_column_width(
-                "0000-00-00 00:00:00",
-                self.t("modified"),
-                ui,
-                theme::SPACE_SMALL,
-                |ch| {
-                    text.advance(font_id, px(ui), ch)
-                        .ok()
-                        .map(|size| f32::from(size.width))
-                },
+        let modified_w = crate::layout::fitted_column_width(
+            "0000-00-00 00:00:00",
+            self.t("modified"),
+            sort_chrome,
+            ui,
+            theme::SPACE_SMALL,
+            advance,
+        );
+        let sort_header = |column: crate::files::SortColumn, label: &'static str| {
+            let direction = pane.files.sort.direction(column);
+            let arrow = match direction {
+                Some(true) => gpui_component::Icon::new(IconName::ArrowDown)
+                    .size(px(sort_icon))
+                    .text_color(p.text)
+                    .into_any_element(),
+                Some(false) => gpui_component::Icon::new(IconName::ArrowUp)
+                    .size(px(sort_icon))
+                    .text_color(p.text)
+                    .into_any_element(),
+                None => div().size(px(sort_icon)).flex_none().into_any_element(),
+            };
+            self.button(
+                SharedString::from(format!("file-sort-{label}")),
+                self.t(label),
             )
+            .ghost()
+            .chromeless()
+            // Match the header text line instead of the 24px control tier so the
+            // fixed header keeps its height at every font size.
+            .h(px((ui * 1.62).ceil().max(20.)))
+            .selected(direction.is_some())
+            .tooltip(self.t("file_sort"))
+            .icon_element(arrow)
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_file_sort(owner, column, cx)))
+            .into_any_element()
         };
         let action_size = (ui + 6.).clamp(20., 26.);
         let action_w = action_size * 4. + theme::SPACE_SMALL * 3.;
@@ -1125,8 +1181,8 @@ impl Workbench {
         );
         let column_row = |prefix: &'static str,
                           name_cell: AnyElement,
-                          second: SharedString,
-                          modified: SharedString,
+                          second: AnyElement,
+                          modified: AnyElement,
                           trailing: bool,
                           actions: AnyElement|
          -> Div {
@@ -1164,6 +1220,8 @@ impl Workbench {
                     div()
                         .w(px(size_w))
                         .flex_shrink_0()
+                        .flex()
+                        .justify_end()
                         .text_right()
                         .text_color(p.muted)
                         .child(second),
@@ -1190,6 +1248,7 @@ impl Workbench {
                         .ml(px(action_gap))
                         .w(px(modified_w))
                         .flex_shrink_0()
+                        .flex()
                         .whitespace_nowrap()
                         .text_color(p.muted)
                         .child(modified),
@@ -1222,8 +1281,8 @@ impl Workbench {
                         .child(self.t("name")),
                 )
                 .into_any_element(),
-            self.t("size").into(),
-            self.t("modified").into(),
+            sort_header(crate::files::SortColumn::Size, "size"),
+            sort_header(crate::files::SortColumn::Modified, "modified"),
             true,
             div().child(self.t("actions")).into_any_element(),
         )
@@ -1468,8 +1527,10 @@ impl Workbench {
                                                         )),
                                                 )
                                                 .into_any_element(),
-                                            size_label,
-                                            crate::files::format_modified(entry.modified).into(),
+                                            div().child(size_label).into_any_element(),
+                                            div()
+                                                .child(crate::files::format_modified(entry.modified))
+                                                .into_any_element(),
                                             false,
                                             actions,
                                         )

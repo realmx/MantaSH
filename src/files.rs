@@ -280,6 +280,101 @@ pub fn listing_entry(
     })
 }
 
+/// A file-list column whose header can change the display order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortColumn {
+    Size,
+    Modified,
+}
+
+/// Display order of one file list. Folders always stay grouped before files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FileSort {
+    /// Folders first, then case-insensitive name: the order a listing arrives in.
+    #[default]
+    Default,
+    /// Sort by `column`; `descending` puts the largest or newest first.
+    By {
+        column: SortColumn,
+        descending: bool,
+    },
+}
+
+impl FileSort {
+    /// Header click cycle: descending, then ascending, then back to the default order.
+    pub fn toggled(self, column: SortColumn) -> Self {
+        match self {
+            Self::By {
+                column: current,
+                descending: true,
+            } if current == column => Self::By {
+                column,
+                descending: false,
+            },
+            Self::By {
+                column: current,
+                descending: false,
+            } if current == column => Self::Default,
+            _ => Self::By {
+                column,
+                descending: true,
+            },
+        }
+    }
+    /// `Some(descending)` when `column` drives the current order, for the header arrow.
+    pub fn direction(self, column: SortColumn) -> Option<bool> {
+        match self {
+            Self::By {
+                column: current,
+                descending,
+            } if current == column => Some(descending),
+            _ => None,
+        }
+    }
+}
+
+/// Unknown values sort after known ones in either direction; only known values reverse.
+fn known_first<T: Ord>(a: Option<T>, b: Option<T>, descending: bool) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (Some(a), Some(b)) if descending => b.cmp(&a),
+        (Some(a), Some(b)) => a.cmp(&b),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+/// Order listing rows in place for display.
+///
+/// Folders precede files under every order. Within each group the chosen column decides,
+/// with unknown sizes or times last in both directions; folders carry no size, so a size
+/// order leaves them by name. Remaining ties fall back to the default name order
+/// (case-insensitive, then exact), which keeps the result independent of the prior order.
+pub fn sort_entries(entries: &mut [FileEntry], sort: FileSort) {
+    entries.sort_by(|a, b| {
+        b.directory
+            .cmp(&a.directory)
+            .then_with(|| match sort {
+                FileSort::Default => std::cmp::Ordering::Equal,
+                FileSort::By {
+                    column: SortColumn::Size,
+                    ..
+                } if a.directory => std::cmp::Ordering::Equal,
+                FileSort::By {
+                    column: SortColumn::Size,
+                    descending,
+                } => known_first(a.size, b.size, descending),
+                FileSort::By {
+                    column: SortColumn::Modified,
+                    descending,
+                } => known_first(a.modified, b.modified, descending),
+            })
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+}
+
 /// Canonicalize the requested directory, preserving hidden files in the returned model.
 pub async fn list(remote: &Remote, path: &str) -> Result<(String, Vec<FileEntry>)> {
     let sftp = remote.sftp().await?;
@@ -295,11 +390,7 @@ pub async fn list(remote: &Remote, path: &str) -> Result<(String, Vec<FileEntry>
         }
         entries.push(listing_entry(&directory, name, &entry.metadata())?);
     }
-    entries.sort_by(|a, b| {
-        b.directory
-            .cmp(&a.directory)
-            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
+    sort_entries(&mut entries, FileSort::Default);
     Ok((directory, entries))
 }
 
