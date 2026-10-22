@@ -672,3 +672,46 @@ fn file_sort_reorders_display_without_changing_path_selection_ranges() {
     assert!(selection.contains("/srv/c") && selection.contains("/srv/a"));
     assert!(!selection.contains("/srv/b"));
 }
+
+#[test]
+fn saved_password_reveal_reads_only_on_demand_for_saved_profiles() {
+    use mantash::credentials::reveal::may_read_saved;
+    assert!(may_read_saved(true, true, true, false));
+    // New or cloned forms, memory off, typed input or a finished read never read.
+    assert!(!may_read_saved(false, true, true, false));
+    assert!(!may_read_saved(true, false, true, false));
+    assert!(!may_read_saved(true, true, false, false));
+    assert!(!may_read_saved(true, true, true, true));
+}
+
+#[test]
+fn saved_password_read_applies_only_to_the_same_untouched_request() {
+    use mantash::credentials::reveal::applies;
+    let (request, profile) = (Id::new_v4(), Id::new_v4());
+    assert!(applies(Some(request), profile, request, profile, true));
+    assert!(
+        !applies(None, profile, request, profile, true),
+        "cancelled or closed"
+    );
+    assert!(
+        !applies(Some(Id::new_v4()), profile, request, profile, true),
+        "stale request"
+    );
+    assert!(
+        !applies(Some(request), Id::new_v4(), request, profile, true),
+        "other profile"
+    );
+    assert!(
+        !applies(Some(request), profile, request, profile, false),
+        "user typed meanwhile"
+    );
+}
+
+#[test]
+fn unchanged_revealed_password_is_not_submitted_as_new() {
+    use mantash::credentials::reveal::submitted_secret;
+    assert_eq!(submitted_secret("saved", Some("saved")), "");
+    assert_eq!(submitted_secret("edited", Some("saved")), "edited");
+    assert_eq!(submitted_secret("", Some("saved")), "");
+    assert_eq!(submitted_secret("typed", None), "typed");
+}

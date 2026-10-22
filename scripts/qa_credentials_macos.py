@@ -65,7 +65,15 @@ class CredentialAcceptance(Acceptance):
         self.check("凭据已保存" in (self.state()["notice"] or ""), "Encrypted local credential write reports success")
         self.action("profile", profile=profile)
         self.wait(lambda s: s["modal"] == "profile" and s["connection_library"]["form"]["existing"], "Saved connection opens its metadata form")
-        self.check(not self.state()["connection_library"]["form"]["secret_present"], "Editing connection metadata never preloads a saved password")
+        form = self.state()["connection_library"]["form"]
+        self.check(not form["secret_present"] and not form["secret_loaded"] and not form["secret_visible"],
+                   "Opening the edit form never pre-reads the saved password")
+        self.action("toggle_profile_secret")
+        self.wait(lambda s: s["connection_library"]["form"]["secret_loaded"] and s["connection_library"]["form"]["secret_visible"],
+                  "The edit-form eye reads and shows the saved password on demand")
+        self.action("toggle_profile_secret")
+        form = self.state()["connection_library"]["form"]
+        self.check(not form["secret_visible"] and form["secret_present"], "Hiding re-masks and keeps the revealed value")
         self.action("dismiss")
         self.action("reconnect")
         self.wait(lambda s: self.pane(s)["state"] == "Connected" and self.pane(s)["attempt"] != attempt,

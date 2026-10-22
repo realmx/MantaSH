@@ -355,6 +355,11 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "password" => ("密码", "Password"),
         "show_password" => ("显示密码", "Show password"),
         "hide_password" => ("隐藏密码", "Hide password"),
+        "no_saved_password" => ("未保存密码", "No saved password"),
+        "saved_password_read_failed" => (
+            "无法读取已保存的密码，请重试。",
+            "Could not read the saved password. Please retry.",
+        ),
         "credentials_required" => ("等待输入凭据", "Waiting for credentials"),
         "enter_password" => ("输入连接密码", "Enter connection password"),
         "credential_saved" => (

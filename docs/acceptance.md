@@ -26,7 +26,7 @@ CI 执行格式、核心测试/编译、文档链接与章节检查及发布辅�
 | `qa_history_connection_modals_macos.py` | 37 项通过的历史记录；后续宽度调整亦有回归 | 历史与连接库布局、选区/Esc、跨标签固定范围、删除取消恢复目标 |
 | `qa_history_owner_macos.py` | 15 项通过 | 真实 PTY 填入不执行、明确执行一次、旧实例/隐藏父帧/切标签/重连/前台程序/断线保护 |
 | `qa_overview_layout_macos.py` | 4 组布局、2 组滚动通过 | 真实 GPUI 边界和键盘流程，隔离监控渲染数据 |
-| `qa_credentials_macos.py run` | 32 项通过 | 主机确认、真实认证、保存、重连、新实例和进程重启复用；表单不预读密码 |
+| `qa_credentials_macos.py run` | 32 项通过 | 主机确认、真实认证、保存、重连、新实例和进程重启复用；编辑表单打开时不预读密码，眼睛按钮按需读取并可重新遮蔽（此项为新增检查，计数待 macOS 复跑更新） |
 | `qa_transfers_macos.py` | 49 项通过 | 上传/下载字节哈希、取消、覆盖重试、后台继续、并发上限及终态 |
 | `qa_about_menu_macos.py` | 双语菜单、重复打开与父帧恢复通过 | 本进程真实 AppKit 菜单触发共享 About，检查可见活动窗口及 Esc |
 | `qa_process_list_macos.py` / `qa_process_details_macos.py` | 布局及归属专项通过 | 少量/大量数据、表头、长命令、身份失效与确认取消；不发送真实信号 |

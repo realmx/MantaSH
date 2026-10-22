@@ -126,6 +126,6 @@ SQLite 访问在后台串行执行，最终工作区保存通过元数据队列 
 ## 安全边界
 
 - 主机身份确认先于本地凭据读取和发送。`SecretStore` 隔离阻塞操作；正式使用 AES-256-GCM `LocalVault`，无主密码、不调用系统钥匙串。本机随机密钥以 `persist_noclobber` 发布，每次写入使用独立 nonce，已有 key 不被替换。
-- 凭据回复不实现 Debug/序列化，秘密用 `Zeroizing`。attempt 固定记忆策略，错误密码不覆盖已保存值；编辑不回填、克隆新 UUID 不复制密码。用户明确确认的 CSV 密码导入是按资料 UUID 写库的独立路径，导出明文密码按敏感文件处理。
+- 凭据回复不实现 Debug/序列化，秘密用 `Zeroizing`。attempt 固定记忆策略，错误密码不覆盖已保存值；编辑表单不预读，仅在用户点击眼睛时经 `runtime.spawn_blocking` 读取并按请求 ID/资料 UUID 过滤旧结果，判定逻辑在 `credentials::reveal`；原样未改的已显示密码按未输入提交；克隆新 UUID 不复制密码。用户明确确认的 CSV 密码导入是按资料 UUID 写库的独立路径，导出明文密码按敏感文件处理。
 - 正式功能连接真实后端，模拟采样仅存在于测试和显式隔离 debug QA。UI 不执行同步网络、文件、数据库或密钥派生，不记录原始键盘输入或凭据；QA 快照只用于隔离测试数据。
 - macOS、Windows、远程 Linux 的验证边界见[验收说明](acceptance.md)。Windows x86/x64/ARM64、ConPTY、DPI、输入法和安装体验仍未实机验收；新增 Linux 验证仅使用用户指定的远程环境，禁止创建或运行本地 Linux VM/容器。

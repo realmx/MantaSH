@@ -280,6 +280,8 @@ pub enum Action {
     ReopenProcessPreview,
     /// Use the same credentials-toolbar edit path as the native button.
     EditCredentialConnection,
+    /// Click the connection form's password eye through the native handler.
+    ToggleProfileSecret,
     /// Create an isolated SSH credential prompt without contacting a host.
     CredentialFixture,
     Dismiss,
@@ -1494,6 +1496,7 @@ impl Workbench {
             }
             Action::ReopenProcessPreview => self.qa_reopen_process_preview(window, cx),
             Action::EditCredentialConnection => self.edit_credential_connection(window, cx),
+            Action::ToggleProfileSecret => self.toggle_profile_secret(window, cx),
             Action::CredentialFixture => {
                 let profile = Profile {
                     id: Id::new_v4(),

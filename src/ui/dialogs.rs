@@ -22,6 +22,17 @@ pub(super) struct ProfileForm {
     port: Entity<InputState>,
     username: Entity<InputState>,
     secret: Entity<InputState>,
+    /// Eye toggle: false keeps the input masked. A new form always starts hidden
+    /// and never pre-reads the saved password.
+    show_secret: bool,
+    /// Pending on-demand read of the saved password; a reopened or closed form
+    /// drops it, so late results are ignored.
+    secret_request: Option<Id>,
+    /// Saved value filled in by the eye toggle. Submitting it unchanged is not a
+    /// new password (see `credentials::reveal::submitted_secret`).
+    secret_revealed: Option<zeroize::Zeroizing<String>>,
+    /// A read finished (with or without a saved value); later clicks only toggle masking.
+    secret_read: bool,
     remember: bool,
     reconnect: Option<Owner>,
     error: Option<String>,
@@ -39,6 +50,9 @@ impl ProfileForm {
         serde_json::json!({"id":self.id,"name":self.name.read(cx).value(),
             "cloning":self.cloning,"existing":self.existing,
             "secret_present":!self.secret.read(cx).value().is_empty(),
+            "secret_visible":self.show_secret,
+            "secret_loaded":self.secret_revealed.is_some(),
+            "secret_pending":self.secret_request.is_some(),
             "username":self.username.read(cx).value(),"port":self.port.read(cx).value()})
     }
 }
@@ -966,6 +980,10 @@ impl Workbench {
             port: Self::input(&profile.port.to_string(), "22", false, window, cx),
             username: Self::input(&profile.username, "root", false, window, cx),
             secret,
+            show_secret: false,
+            secret_request: None,
+            secret_revealed: None,
+            secret_read: false,
             remember: self.prefs.remember_credentials,
             reconnect,
             error: None,
@@ -1015,7 +1033,11 @@ impl Workbench {
             return;
         }
         let secret = zeroize::Zeroizing::new(if connect {
-            form.secret.read(cx).value().to_string()
+            crate::credentials::reveal::submitted_secret(
+                &form.secret.read(cx).value(),
+                form.secret_revealed.as_deref().map(String::as_str),
+            )
+            .to_string()
         } else {
             String::new()
         });
@@ -1478,6 +1500,149 @@ impl Workbench {
         })
         .detach();
     }
+    /// Password field of the connection form with the same eye toggle as the
+    /// password prompt. It only switches masking of what the user typed in this
+    /// form; nothing is read from the credential store and nothing is logged.
+    fn profile_secret_field(&self, form: &ProfileForm, cx: &mut Context<Self>) -> Div {
+        let showing = form.show_secret;
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(theme::SPACE_SMALL))
+            .w_full()
+            .child(div().child(self.t("password").to_string()))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(theme::SPACE_SMALL))
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            self.input_box(&form.secret)
+                                .text_size(px(self.prefs.ui_size)),
+                        ),
+                    )
+                    .child(
+                        self.button("toggle-profile-secret", "")
+                            .svg_icon(if showing {
+                                "icons/eye-off.svg"
+                            } else {
+                                "icons/eye.svg"
+                            })
+                            .ghost()
+                            .chromeless()
+                            .w(px(20.))
+                            .h(px(20.))
+                            .p_0()
+                            .tooltip(self.t(if showing {
+                                "hide_password"
+                            } else {
+                                "show_password"
+                            }))
+                            .on_click(
+                                cx.listener(|this, _, w, cx| this.toggle_profile_secret(w, cx)),
+                            ),
+                    ),
+            )
+    }
+    /// Eye click in the connection form. Showing an untouched edit form with
+    /// credential memory on reads the saved password once, on demand, off the
+    /// main thread; otherwise it only switches masking. Hiding (or clicking while
+    /// a read is pending) re-masks, keeps the value and cancels the read.
+    pub(super) fn toggle_profile_secret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let remember = self.prefs.remember_credentials;
+        let runtime = self.backend.runtime.clone();
+        let vault = self.backend.vault.clone();
+        let Some(Modal::Profile(form)) = &mut self.modal else {
+            return;
+        };
+        if form.secret_request.take().is_some() || form.show_secret {
+            form.show_secret = false;
+            form.secret
+                .update(cx, |state, cx| state.set_masked(true, window, cx));
+            cx.notify();
+            return;
+        }
+        form.show_secret = true;
+        form.secret
+            .update(cx, |state, cx| state.set_masked(false, window, cx));
+        let typed_empty = form.secret.read(cx).value().is_empty();
+        if crate::credentials::reveal::may_read_saved(
+            form.existing && !form.cloning,
+            remember && form.remember,
+            typed_empty,
+            form.secret_read,
+        ) {
+            use crate::credentials::SecretStore;
+            let request = Id::new_v4();
+            let profile = form.id;
+            form.secret_request = Some(request);
+            let task = runtime.spawn_blocking(move || vault.read(profile));
+            cx.spawn_in(window, async move |view, cx| {
+                let result = match task.await {
+                    Ok(Ok(secret)) => Ok(secret),
+                    _ => Err(()),
+                };
+                let _ = view.update_in(cx, |this, window, cx| {
+                    this.apply_saved_secret(request, profile, result, window, cx)
+                });
+            })
+            .detach();
+        }
+        cx.notify();
+    }
+    /// Fill the saved password only into the same, still untouched form. The
+    /// failure message carries no store detail and nothing is logged.
+    fn apply_saved_secret(
+        &mut self,
+        request: Id,
+        profile: Id,
+        result: Result<Option<zeroize::Zeroizing<String>>, ()>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let failed = self.t("saved_password_read_failed").to_string();
+        let missing = self.t("no_saved_password").to_string();
+        let Some(Modal::Profile(form)) = &mut self.modal else {
+            return;
+        };
+        let typed_empty = form.secret.read(cx).value().is_empty();
+        let current = form.secret_request == Some(request);
+        if current {
+            form.secret_request = None;
+        }
+        if !crate::credentials::reveal::applies(
+            current.then_some(request),
+            form.id,
+            request,
+            profile,
+            typed_empty,
+        ) {
+            return;
+        }
+        match result {
+            Ok(Some(secret)) => {
+                form.secret.update(cx, |state, cx| {
+                    state.set_value(secret.as_str().to_string(), window, cx);
+                    state.set_masked(false, window, cx);
+                });
+                form.secret_revealed = Some(secret);
+                form.secret_read = true;
+            }
+            Ok(None) => {
+                form.secret
+                    .update(cx, |state, cx| state.set_placeholder(missing, window, cx));
+                form.secret_read = true;
+            }
+            Err(()) => {
+                form.show_secret = false;
+                form.secret
+                    .update(cx, |state, cx| state.set_masked(true, window, cx));
+                form.error = Some(failed);
+            }
+        }
+        cx.notify();
+    }
     pub(super) fn field(&self, label: &str, input: &Entity<InputState>) -> Div {
         div()
             .flex()
@@ -1886,7 +2051,7 @@ impl Workbench {
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .child(self.field(self.t("password"), &form.secret)),
+                                    .child(self.profile_secret_field(form, cx)),
                             ),
                     )
                     .when_some(form.error.clone(), |body, error| {
