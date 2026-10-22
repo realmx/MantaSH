@@ -55,7 +55,7 @@ python scripts/qa_terminal_boundaries.py --binary target/debug/mantash.exe --she
 | 文件与编辑 | 单选、Shift/Ctrl 多选、双击导航；上传文件/下载文件或目录、重命名、删除、覆盖冲突和保存失败 |
 | 编码与历史 | UTF-8、GBK、GB18030、Big5，文件 UTF-16 LE/BE 与 BOM；PSReadLine 报告、填入/执行与敏感输入保护 |
 | Linux 远端 | 连接 Linux 主机并与服务器命令核对 CPU、内存、磁盘、网络、进程和端口 |
-| 标签、分屏、窗口 | 本地最多五窗格混合布局、焦点/比例/恢复，SSH 不分屏；不同尺寸下标题栏、菜单、标签滚动与关闭保护 |
+| 标签、分屏、窗口 | 本地最多十窗格混合布局、焦点/比例/恢复，SSH 不分屏；不同尺寸下标题栏、菜单、标签滚动与关闭保护 |
 | 外观与数据 | 中英文/明暗主题恢复；导出 CSV 的明文 `password` 按敏感文件处理 |
 
 macOS/Unix 的 OpenSSH SFTP 子进程测试不是 Windows 实机证据；Windows SFTP 仍须使用明确的测试服务器。记录系统版本、架构、DPI、Rust/Shell 版本、操作步骤、预期与实际结果；失败附首条错误及上下文，不附凭据或生产历史。当前验收状态见[验收记录](acceptance.md)。

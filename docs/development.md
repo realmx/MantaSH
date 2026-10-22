@@ -59,7 +59,7 @@ cargo build --locked
 | 凭据与 SSH/SFTP | `automatic_vault`、`ssh_sftp` | 主机确认先于凭据读取、认证后保存、错误密码保护、旧回复取消、真实 SFTP 文件及传输；`tests/support/credential_reconnect.rs` 由 `ssh_sftp` 引入 |
 | 终端 I/O、网格与输入 | `local_pty`、`terminal_updates`、`terminal_paint`、`local_terminal_clear`、`command_cursor`、`git_bash` | 真实 PTY、连续 resize/关闭、唤醒合并、damage 与完整帧逐格一致、局部复制、Unicode、清屏与滚动边界、提示符定位 |
 | 文件选择与编辑 | `file_selection`、`editor_format`、`ssh_sftp` | 隐藏过滤/过期选区、UTF-8 端点、最新读取、最后保存覆盖、权限/取消失败保护及目录传输 |
-| 工作区与偏好 | `layout_storage`、`preferences_normalize`、`window_layout` | 五窗格上限、损坏图恢复、格式标记、宽度偏好、默认值及几何、文件列表修改时间与排序表头列宽 |
+| 工作区与偏好 | `layout_storage`、`preferences_normalize`、`window_layout` | 十窗格上限、损坏图恢复、格式标记、宽度偏好、默认值及几何、文件列表修改时间与排序表头列宽 |
 | Linux 监控与进程 | `monitor_history`、`processes`、`process_command_filter`、`import_monitor_boundaries` | 缺失分段、差值、身份一致、受保护 PID、固定信号、未知结果及 macOS 拒绝 Linux 操作 |
 | 自动更新 | `update` | 版本/平台资源选择、校验、安装助手和失败边界，另见[自动更新](updates.md) |
 
@@ -146,8 +146,8 @@ macOS 的 `/var` 与 `/private/var` 必须统一为解析后的路径。`stage_t
 
 | 脚本 | 启动方式与依赖 | 覆盖与限制 |
 |---|---|---|
-| [qa_smoke.py](../scripts/qa_smoke.py) | 现有窗口 + fixture；部分断言待适配 | 先准备第一个标签的 5 个本地窗格、第二个已信任并认证的回环 SSH 标签；分屏、面板、SFTP 与草稿冒烟，保留旧工作页断言 |
-| [qa_accept_macos.py](../scripts/qa_accept_macos.py) | 现有窗口 + fixture；`exercise` / `restore`，部分断言待适配 | 组合输入、五窗格、文件重读/覆盖和恢复场景；两阶段间实际退出并重启，编辑器工作页断言需适配当前弹窗 |
+| [qa_smoke.py](../scripts/qa_smoke.py) | 现有窗口 + fixture；部分断言待适配 | 先准备第一个标签的 10 个本地窗格、第二个已信任并认证的回环 SSH 标签；分屏、面板、SFTP 与草稿冒烟，保留旧工作页断言 |
+| [qa_accept_macos.py](../scripts/qa_accept_macos.py) | 现有窗口 + fixture；`exercise` / `restore`，部分断言待适配 | 组合输入、十窗格、文件重读/覆盖和恢复场景；两阶段间实际退出并重启，编辑器工作页断言需适配当前弹窗 |
 | [qa_completion_macos.py](../scripts/qa_completion_macos.py) | 现有窗口，真实本地 Shell | 文件/中文路径/目录/命令补全、前台 Backtab、组合输入保护及表单导航 |
 | [qa_tabs_macos.py](../scripts/qa_tabs_macos.py) | 现有窗口 | 动态名称、滚动边界、后台输出、活动标签及窗口尺寸；几何来自原生预绘制 |
 | [qa_tab_reorder_macos.py](../scripts/qa_tab_reorder_macos.py) | 自行启动 | 排序、栏外/Esc 取消、关闭、滚动、字号和保存；先等待 AppKit 查询原生区域，再比较 GPUI 边界及投递指针事件 |

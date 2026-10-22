@@ -131,13 +131,19 @@ class Acceptance:
         self.action("search", query="中文提交")
         self.wait(lambda s: pane(s)["terminal"]["matches"] > 0, "终端 Unicode 搜索更新")
         self.action("close_search")
-        for vertical in [False, True, False, True, False]:
-            self.action("split", vertical=vertical)
-        self.wait(lambda s: len(s["tabs"][0]["panes"]) == 5 and all(p["state"] == "Connected" for p in s["tabs"][0]["panes"]), "混合分屏五个真实 Shell，第六次被拒绝")
-        retained = {p["owner"] for p in self.state()["tabs"][0]["panes"][:4]}
-        self.action("close_pane", index=4)
-        self.check({p["owner"] for p in self.state()["tabs"][0]["panes"]} == retained, "关闭窗格不更换其余会话")
+        for index in range(9):
+            self.action("split", vertical=index % 2 == 1)
+        s = self.wait(lambda s: len(s["tabs"][0]["panes"]) == 10 and all(p["state"] == "Connected" for p in s["tabs"][0]["panes"]), "混合分屏十个真实 Shell")
+        owners = {p["owner"] for p in s["tabs"][0]["panes"]}
         self.action("split", vertical=True)
+        s = self.state()
+        self.check(len(s["tabs"][0]["panes"]) == 10 and {p["owner"] for p in s["tabs"][0]["panes"]} == owners, "第十一个窗格被拒绝且保留所有会话")
+        retained = {p["owner"] for p in s["tabs"][0]["panes"][:9]}
+        self.action("close_pane", index=9)
+        self.wait(lambda s: len(s["tabs"][0]["panes"]) == 9 and {p["owner"] for p in s["tabs"][0]["panes"]} == retained, "关闭第十个窗格不更换其余会话")
+        self.action("split", vertical=True)
+        s = self.wait(lambda s: len(s["tabs"][0]["panes"]) == 10 and all(p["state"] == "Connected" for p in s["tabs"][0]["panes"]), "关闭后可重新创建第十个真实 Shell")
+        self.check(retained.issubset({p["owner"] for p in s["tabs"][0]["panes"]}), "补充分屏保留其余会话")
         self.action("focus_pane", index=2)
         self.check(self.state()["tool_width"] is None, "本地标签始终隐藏右栏")
 

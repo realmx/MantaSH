@@ -20,22 +20,52 @@ fn mixed_local_tree_caps_and_closes_without_replacing_other_panes() {
     let first = Id::new_v4();
     let mut tree = PaneLayout::single(first);
     let mut active = first;
-    for axis in [
-        Split::Horizontal,
-        Split::Vertical,
-        Split::Horizontal,
-        Split::Vertical,
-    ] {
+    for index in 1..10 {
+        let axis = if index % 2 == 0 {
+            Split::Vertical
+        } else {
+            Split::Horizontal
+        };
         let added = Id::new_v4();
         assert!(tree.split(active, added, axis));
         active = added;
     }
-    assert_eq!(tree.panes().len(), 5);
-    assert!(!tree.split(active, Id::new_v4(), Split::Horizontal));
+    assert_eq!(tree.panes().len(), 10);
     let original = tree.panes();
+    assert!(!tree.split(active, Id::new_v4(), Split::Horizontal));
+    assert_eq!(tree.panes(), original);
     let mut closed = tree.without(active).unwrap();
-    assert_eq!(closed.panes(), original[..4]);
+    assert_eq!(closed.panes(), original[..9]);
     assert!(closed.split(first, Id::new_v4(), Split::Vertical));
+    assert_eq!(closed.panes().len(), 10);
+}
+
+#[test]
+fn ten_pane_workspace_restores_layout_focus_and_sessions() {
+    let panes: Vec<_> = (0..10).map(|_| SavedPane::new(local())).collect();
+    let ids: Vec<_> = panes.iter().map(|pane| pane.id).collect();
+    let mut tree = PaneLayout::single(ids[0]);
+    for (index, pair) in ids.windows(2).enumerate() {
+        let axis = if index % 2 == 0 {
+            Split::Horizontal
+        } else {
+            Split::Vertical
+        };
+        assert!(tree.split(pair[0], pair[1], axis));
+    }
+    let workspace = Workspace {
+        tabs: vec![SavedTab {
+            id: Id::new_v4(),
+            panes,
+            active_pane: ids[9],
+            layout: Some(tree),
+        }],
+        active_tab: 0,
+    };
+    let saved = serde_json::to_value(&workspace).unwrap();
+    let mut restored: Workspace = serde_json::from_value(saved.clone()).unwrap();
+    restored.normalize();
+    assert_eq!(serde_json::to_value(restored).unwrap(), saved);
 }
 #[test]
 fn unstamped_databases_adopt_the_format_stamp_and_others_are_rejected() {

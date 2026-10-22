@@ -56,15 +56,20 @@ def main():
         return tab["panes"][tab["active_pane"]]
 
     action("tab", index=0)
-    state = wait(lambda s: len(s["tabs"][0]["panes"]) == 5 and all(p["state"] == "Connected" for p in s["tabs"][0]["panes"]), "restored five local shells")
+    state = wait(lambda s: len(s["tabs"][0]["panes"]) == 10 and all(p["state"] == "Connected" for p in s["tabs"][0]["panes"]), "restored ten local shells")
     assert state["tool_width"] is None
+    owners = {p["owner"] for p in state["tabs"][0]["panes"]}
     action("split", vertical=True)
-    assert len(read()["tabs"][0]["panes"]) == 5
-    survivors = {p["owner"] for p in read()["tabs"][0]["panes"][:4]}
-    action("close_pane", index=4)
-    assert {p["owner"] for p in read()["tabs"][0]["panes"]} == survivors
+    state = read()
+    assert len(state["tabs"][0]["panes"]) == 10
+    assert {p["owner"] for p in state["tabs"][0]["panes"]} == owners
+    results.append("eleventh local pane is refused")
+    survivors = {p["owner"] for p in state["tabs"][0]["panes"][:9]}
+    action("close_pane", index=9)
+    wait(lambda s: len(s["tabs"][0]["panes"]) == 9 and {p["owner"] for p in s["tabs"][0]["panes"]} == survivors, "closing tenth pane preserves surviving owners")
     action("split", vertical=True)
-    assert len(read()["tabs"][0]["panes"]) == 5
+    state = wait(lambda s: len(s["tabs"][0]["panes"]) == 10 and all(p["state"] == "Connected" for p in s["tabs"][0]["panes"]), "replacement tenth local shell connects")
+    assert survivors.issubset({p["owner"] for p in state["tabs"][0]["panes"]})
     results.append("split cap and close preserve surviving owners")
     action("focus_pane", index=0)
     action("type", text="printf 'MantaSH 中文验收\\n'\r")

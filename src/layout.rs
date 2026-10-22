@@ -3,7 +3,8 @@ use crate::model::{Id, Split};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const MAX_LOCAL_PANES: usize = 5;
+/// Maximum number of independent terminal panes in one local tab.
+pub const MAX_LOCAL_PANES: usize = 10;
 /// Minimum logical width of the SSH tools sidebar when no user preference exists.
 pub const TOOL_MIN_WIDTH: f32 = 280.;
 
