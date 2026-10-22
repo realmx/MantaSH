@@ -460,6 +460,8 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "hidden" => ("显示隐藏文件", "Show hidden files"),
         "upload" => ("上传", "Upload"),
         "download" => ("下载", "Download"),
+        "network_received" => ("接收", "Received"),
+        "network_sent" => ("发送", "Sent"),
         "mkdir" => ("新建目录", "New directory"),
         "rename" => ("重命名", "Rename"),
         "select_all" => ("全选", "Select all"),

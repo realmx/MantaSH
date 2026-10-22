@@ -1227,13 +1227,13 @@ impl Workbench {
                     .w_full()
                     .gap(px(theme::SPACE_PANEL))
                     .child(self.network_speed(
-                        "download",
+                        "network_received",
                         latest.and_then(|point| point.received),
                         p.accent,
                         IconName::ArrowDown,
                     ))
                     .child(self.network_speed(
-                        "upload",
+                        "network_sent",
                         latest.and_then(|point| point.sent),
                         p.network_sent,
                         IconName::ArrowUp,
