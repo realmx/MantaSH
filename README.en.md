@@ -32,7 +32,7 @@ Alternatively, download the package for your architecture from [GitHub Releases]
 
 - Local PTY terminals, tabs and Shell integration; each local tab supports up to ten horizontal, vertical or mixed panes. SSH tabs cannot be split.
 - SSH password authentication, host-fingerprint verification, reconnection and locally encrypted credentials; searchable profiles with sorting, cloning, multiple selection and CSV import/export.
-- SFTP browsing, copying, renaming, deletion, uploads, downloads and background transfers; text editing up to 8 MB with strict encoding, session drafts and undoable basic formatting.
+- SFTP browsing, copying, moving, renaming, deletion, uploads, downloads and background transfers; text editing up to 8 MB with strict encoding, session drafts and undoable basic formatting.
 - Shared SSH command history with search, copy, fill and explicit execution; Linux resource, process and port details, with confirmation before terminating a process.
 - Chinese and English, light/dark themes, system appearance, fonts, workspace restoration and updates that download, verify and install after confirmation.
 

@@ -451,6 +451,98 @@ async fn copy_and_rename_preflight_preserve_targets_and_permissions() {
 }
 
 #[tokio::test]
+async fn move_renames_batches_without_overwrite_and_reports_each_entry() {
+    use std::os::unix::fs::symlink;
+    let fixture = Fixture::new().await;
+    let remote = fixture.connected().await;
+    let root = fixture._directory.path().canonicalize().unwrap();
+    let source_dir = root.join("from");
+    let target = root.join("to");
+    std::fs::create_dir_all(source_dir.join("folder/inner")).unwrap();
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(source_dir.join("quote' $a.txt"), b"a bytes").unwrap();
+    std::fs::write(source_dir.join("folder/inner/deep.txt"), b"deep").unwrap();
+    std::fs::write(source_dir.join("taken.txt"), b"source").unwrap();
+    std::fs::write(target.join("taken.txt"), b"keep").unwrap();
+    symlink(source_dir.join("quote' $a.txt"), source_dir.join("link")).unwrap();
+    let text = |path: &std::path::Path| path.to_string_lossy().into_owned();
+    let entry = |name: &str, directory: bool, symlink: bool| files::CopySource {
+        path: text(&source_dir.join(name)),
+        directory,
+        symlink,
+    };
+    // Preflight refusals leave every entry where it was.
+    assert!(
+        files::move_entries(
+            &remote,
+            &[entry("quote' $a.txt", false, false)],
+            &text(&source_dir)
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        files::move_entries(
+            &remote,
+            &[entry("folder", true, false)],
+            &text(&source_dir.join("folder/inner"))
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        files::move_entries(
+            &remote,
+            &[
+                entry("quote' $a.txt", false, false),
+                entry("taken.txt", false, false)
+            ],
+            &text(&target)
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(std::fs::read(target.join("taken.txt")).unwrap(), b"keep");
+    assert!(source_dir.join("quote' $a.txt").exists());
+    // A type changed since marking is refused, not followed.
+    assert!(
+        files::move_entries(&remote, &[entry("folder", false, false)], &text(&target))
+            .await
+            .is_err()
+    );
+    // A real batch moves files, folders (with contents) and symlinks themselves.
+    let report = files::move_entries(
+        &remote,
+        &[
+            entry("quote' $a.txt", false, false),
+            entry("folder", true, false),
+            entry("link", false, true),
+        ],
+        &text(&target),
+    )
+    .await
+    .unwrap();
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert_eq!(report.moved.len(), 3);
+    assert_eq!(
+        std::fs::read(target.join("quote' $a.txt")).unwrap(),
+        b"a bytes"
+    );
+    assert_eq!(
+        std::fs::read(target.join("folder/inner/deep.txt")).unwrap(),
+        b"deep"
+    );
+    assert!(
+        std::fs::symlink_metadata(target.join("link"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(!source_dir.join("quote' $a.txt").exists() && !source_dir.join("folder").exists());
+    remote.cancel.cancel();
+}
+
+#[tokio::test]
 async fn credentials_wait_for_explicit_host_approval() {
     let fixture = Fixture::new().await;
     let remote = fixture.connected().await;

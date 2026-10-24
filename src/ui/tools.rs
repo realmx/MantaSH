@@ -24,7 +24,9 @@ file_menu_actions!(
     FileMenuEdit,
     FileMenuDownload,
     FileMenuCopy,
+    FileMenuMove,
     FileMenuPaste,
+    FileMenuCancelClipboard,
     FileMenuRename,
     FileMenuDelete,
     FileMenuMkdir
@@ -1035,6 +1037,53 @@ impl Workbench {
                         this.show_modal(Modal::Transfers { owner }, w, cx)
                     })),
             )
+            .when_some(
+                pane.files
+                    .clipboard
+                    .as_ref()
+                    .filter(|clipboard| clipboard.owner == owner)
+                    .map(|clipboard| (clipboard.mode, clipboard.sources.len())),
+                |row, (mode, count)| {
+                    // The pending buffer is always visible: a labelled paste that
+                    // says whether it copies or moves, and a cancel beside it.
+                    let moving = mode == ClipboardMode::Move;
+                    let (label, cancel) = if moving {
+                        (self.t("move_here"), self.t("cancel_move"))
+                    } else {
+                        (self.t("paste"), self.t("cancel_copy"))
+                    };
+                    let blocked = pane.files.loading
+                        || !pane.files.loaded
+                        || pane.state != ConnectionState::Connected
+                        || pane.files.pending.values().any(|pending| {
+                            matches!(
+                                pending.operation,
+                                crate::services::FileOperation::Move(..)
+                                    | crate::services::FileOperation::Copy(..)
+                            )
+                        });
+                    row.child(
+                        self.button("paste-files", format!("{label} ({count})"))
+                            .svg_icon("icons/clipboard-paste.svg")
+                            .ghost()
+                            .primary()
+                            .tooltip(format!("{label} · {count} {}", self.t("file_items")))
+                            .disabled(blocked)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.paste_file_clipboard(owner, cx);
+                            })),
+                    )
+                    .child(
+                        self.button("cancel-file-clipboard", "")
+                            .icon(IconName::Close)
+                            .ghost()
+                            .tooltip(cancel)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.cancel_file_clipboard(owner, cx);
+                            })),
+                    )
+                },
+            )
             .when(selected > 0, |row| {
                 row.child(
                     self.button("delete-file", "")
@@ -1164,7 +1213,9 @@ impl Workbench {
             .into_any_element()
         };
         let action_size = (ui + 6.).clamp(20., 26.);
-        let action_w = action_size * 4. + theme::SPACE_SMALL * 3.;
+        // Rename, copy, move, download and delete: five buttons, four gaps.
+        const ROW_ACTIONS: f32 = 5.;
+        let action_w = action_size * ROW_ACTIONS + theme::SPACE_SMALL * (ROW_ACTIONS - 1.);
         let panel = f32::from(pane.files.scroll.bounds().size.width);
         let action_gap = if panel < 560. {
             theme::SPACE_CONTROL
@@ -1481,9 +1532,16 @@ impl Workbench {
                                                             )
                                                             .into()
                                                     };
+                                                    // The move button stays selected while this row is
+                                                    // the session's pending move source.
+                                                    let marked_move = pane.files.clipboard.as_ref().is_some_and(|clipboard| {
+                                                        clipboard.mode == ClipboardMode::Move
+                                                            && clipboard.sources.iter().any(|source| source.path == entry.path)
+                                                    });
                                                     let actions = div().flex().gap(px(theme::SPACE_SMALL)).children([
                                                         ("rename", "icons/pencil.svg", FileAction::Rename),
                                                         ("copy", "icons/copy.svg", FileAction::Copy),
+                                                        ("move", "icons/scissors.svg", FileAction::Move),
                                                         ("download", "icons/download.svg", FileAction::Download),
                                                         ("delete", "icons/trash-2.svg", FileAction::Delete),
                                                     ].into_iter().map(|(key, icon, action)| {
@@ -1494,6 +1552,7 @@ impl Workbench {
                                                             .when(key != "copy", |button| button.svg_icon(icon)).ghost().w(px(action_size)).h(px(action_size))
                                                             .when(key == "download", |button| button.primary())
                                                             .when(key == "delete", |button| button.danger())
+                                                            .when(key == "move", |button| button.selected(marked_move))
                                                             .tooltip(format!("{} · {}", self.t(key), entry.name))
                                                             .disabled(pane.files.loading || !pane.files.loaded || pane.state != ConnectionState::Connected)
                                                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -1650,17 +1709,33 @@ impl Workbench {
                                         gpui_component::menu::PopupMenu,
                                     >| {
                                         let this = entity.read(menu_cx);
-                                        let (busy, count, can_paste, editable) =
-                                            this.pane(owner).map_or((true, 0, false, false), |pane| {
+                                        let (busy, count, clipboard, editable) =
+                                            this.pane(owner).map_or((true, 0, None, false), |pane| {
                                                 (
                                                     pane.files.loading
                                                         || pane.state
                                                             != ConnectionState::Connected,
                                                     pane.files.selected_paths().len(),
-                                                    pane.files.clipboard.is_some(),
+                                                    pane.files
+                                                        .clipboard
+                                                        .as_ref()
+                                                        .filter(|clipboard| clipboard.owner == owner)
+                                                        .map(|clipboard| clipboard.mode),
                                                     pane.files.edit_target().is_some(),
                                                 )
                                             });
+                                        let can_paste = clipboard.is_some();
+                                        // A pending move pastes as "Move here", never as a copy.
+                                        let paste_label = if clipboard == Some(ClipboardMode::Move) {
+                                            this.t("move_here")
+                                        } else {
+                                            this.t("paste")
+                                        };
+                                        let cancel_label = if clipboard == Some(ClipboardMode::Move) {
+                                            this.t("cancel_move")
+                                        } else {
+                                            this.t("cancel_copy")
+                                        };
                                         let no_targets = count == 0;
                                         let multi = count != 1;
                                         menu
@@ -1680,10 +1755,21 @@ impl Workbench {
                                                 no_targets || busy,
                                             )
                                             .menu_with_disabled(
-                                                this.t("paste").to_string(),
+                                                this.t("move").to_string(),
+                                                Box::new(FileMenuMove { owner }),
+                                                no_targets || busy,
+                                            )
+                                            .menu_with_disabled(
+                                                paste_label.to_string(),
                                                 Box::new(FileMenuPaste { owner }),
                                                 !can_paste || busy,
                                             )
+                                            .when(can_paste, |menu| {
+                                                menu.menu(
+                                                    cancel_label.to_string(),
+                                                    Box::new(FileMenuCancelClipboard { owner }),
+                                                )
+                                            })
                                             // Destructive actions follow the safe file
                                             // operations; refresh remains in the toolbar.
                                             .menu_with_disabled(
@@ -1741,16 +1827,23 @@ impl Workbench {
         }
         content.into_any_element()
     }
-    /// Capture the current selection as this session's copy buffer.
-    pub(super) fn copy_file_selection(&mut self, owner: Owner, cx: &mut Context<Self>) {
+    /// Capture the current selection as this session's copy or move buffer.
+    pub(super) fn mark_file_selection(
+        &mut self,
+        owner: Owner,
+        mode: ClipboardMode,
+        cx: &mut Context<Self>,
+    ) {
         let paths = self
             .pane(owner)
             .map(|pane| pane.files.selected_paths())
             .unwrap_or_default();
-        self.copy_file_targets(owner, paths, cx);
+        self.mark_file_targets(owner, paths, mode, cx);
     }
-    /// Paste the copy buffer into the directory on screen: name collisions
-    /// are rejected up front so the remote copy never nests or overwrites.
+    /// Paste the buffer into the directory on screen. Copy collisions are
+    /// rejected by the worker; a move is also refused here, before any request,
+    /// when it targets its own directory, a folder inside itself, or a name the
+    /// listing already holds. The worker repeats every check before renaming.
     pub(super) fn paste_file_clipboard(&mut self, owner: Owner, cx: &mut Context<Self>) {
         let Some(pane) = self.pane(owner) else {
             return;
@@ -1765,12 +1858,52 @@ impl Workbench {
         };
         let origin = FileSnapshot::capture(pane, Vec::new());
         let target = origin.directory.clone();
-        self.submit_file_operation(
-            origin,
-            crate::services::FileOperation::Copy(clipboard.sources, target),
-            false,
-            cx,
-        );
+        let operation = match clipboard.mode {
+            ClipboardMode::Copy => crate::services::FileOperation::Copy(clipboard.sources, target),
+            ClipboardMode::Move => {
+                // One move at a time per session: its receipt consumes the buffer.
+                if pane.files.pending.values().any(|pending| {
+                    matches!(pending.operation, crate::services::FileOperation::Move(..))
+                }) {
+                    return;
+                }
+                let refusal = match files::plan_move(&clipboard.sources, &target) {
+                    Ok(plan) => {
+                        let conflicts = files::move_conflicts(&plan, |destination| {
+                            pane.files
+                                .entries
+                                .iter()
+                                .any(|entry| entry.path == destination)
+                        });
+                        (!conflicts.is_empty()).then(|| {
+                            let names: Vec<&str> = conflicts
+                                .iter()
+                                .map(|path| path.rsplit('/').next().unwrap_or(path))
+                                .collect();
+                            format!("{}: {}", self.t("paste_exists"), names.join(", "))
+                        })
+                    }
+                    Err(files::MoveRejection::SameDirectory) => {
+                        Some(self.t("move_same_directory").to_string())
+                    }
+                    Err(files::MoveRejection::IntoItself(path)) => Some(format!(
+                        "{}: {}",
+                        self.t("move_into_itself"),
+                        path.rsplit('/').next().unwrap_or(&path)
+                    )),
+                    Err(files::MoveRejection::DuplicateName(name)) => {
+                        Some(format!("{}: {name}", self.t("move_duplicate")))
+                    }
+                    Err(error) => Some(format!("{}: {error}", self.t("move_failed"))),
+                };
+                if let Some(message) = refusal {
+                    self.file_paste_refused(owner, message, cx);
+                    return;
+                }
+                crate::services::FileOperation::Move(clipboard.sources, target)
+            }
+        };
+        self.submit_file_operation(origin, operation, false, cx);
     }
     /// Expand a tree directory (always fetching the freshest listing) or
     /// collapse it (releasing the cached subtree so memory and row state

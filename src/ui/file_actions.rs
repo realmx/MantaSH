@@ -39,18 +39,68 @@ impl FileSnapshot {
 pub(super) struct PendingFileOperation {
     pub origin: FileSnapshot,
     pub operation: FileOperation,
+    /// The marked buffer this move submitted; later marks have a different ID.
+    pub clipboard_id: Option<Id>,
 }
+impl PendingFileOperation {
+    /// A successful move consumes only its own buffer; rename retains its existing
+    /// invalidation behavior. A fully refused operation leaves the buffer available.
+    fn update_clipboard(&self, clipboard: &mut Option<FileClipboard>, moved: bool) {
+        if moved
+            && match &self.operation {
+                FileOperation::Move(..) => clipboard
+                    .as_ref()
+                    .is_some_and(|current| Some(current.id) == self.clipboard_id),
+                FileOperation::Rename(..) => true,
+                _ => false,
+            }
+        {
+            *clipboard = None;
+        }
+    }
+}
+/// What a paste does with the marked entries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ClipboardMode {
+    /// Duplicate with the remote POSIX `cp -R`.
+    Copy,
+    /// Relocate with SFTP RENAME; the buffer is consumed once anything moved.
+    Move,
+}
+/// One session's marked entries; a single buffer, so marking a move replaces a copy.
 #[derive(Clone)]
 pub(super) struct FileClipboard {
+    pub id: Id,
     pub owner: Owner,
+    pub mode: ClipboardMode,
     pub sources: Vec<files::CopySource>,
+}
+/// Applied only to the listing `request` a finished move started: select what landed
+/// there and keep a per-entry failure report visible after the refresh.
+pub(super) struct ListingFollowUp {
+    pub request: Id,
+    pub select: Vec<String>,
+    pub error: Option<String>,
 }
 #[derive(Clone, Copy)]
 pub(super) enum FileAction {
     Rename,
     Copy,
+    Move,
     Download,
     Delete,
+}
+
+/// `(from, to)` prefixes an operation relocates. Reads, saves and draft paths under
+/// either side wait for its receipt, exactly as a rename does.
+pub(super) fn relocations(operation: &FileOperation) -> Vec<(String, String)> {
+    match operation {
+        FileOperation::Rename(from, to) => vec![(from.clone(), to.clone())],
+        FileOperation::Move(sources, target) => {
+            files::plan_move(sources, target).unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
 }
 
 impl Workbench {
@@ -85,12 +135,13 @@ impl Workbench {
         };
         self.submit_file_operation(origin, operation, true, cx);
     }
-    /// A rename owns both path prefixes until its real receipt. Reads/saves cannot race it.
+    /// A rename or move owns both path prefixes until its real receipt. Reads/saves cannot race it.
     pub(super) fn file_path_busy(&self, owner: Owner, path: &str) -> bool {
         self.pane(owner).is_some_and(|pane| {
             pane.files.pending.values().any(|pending| {
-                matches!(&pending.operation, FileOperation::Rename(from, to)
-                if files::contains_path(from, path) || files::contains_path(to, path))
+                relocations(&pending.operation).iter().any(|(from, to)| {
+                    files::contains_path(from, path) || files::contains_path(to, path)
+                })
             })
         })
     }
@@ -115,7 +166,8 @@ impl Workbench {
         }
         match action {
             FileAction::Rename => self.file_name_target(origin, Some(path), window, cx),
-            FileAction::Copy => self.copy_file_targets(owner, vec![path], cx),
+            FileAction::Copy => self.mark_file_targets(owner, vec![path], ClipboardMode::Copy, cx),
+            FileAction::Move => self.mark_file_targets(owner, vec![path], ClipboardMode::Move, cx),
             FileAction::Download => {
                 self.choose_transfer_targets(owner, false, false, Some(vec![path]), window, cx)
             }
@@ -154,10 +206,13 @@ impl Workbench {
             cx,
         );
     }
-    pub(super) fn copy_file_targets(
+    /// Mark visible entries of the current listing for a later copy or move paste.
+    /// Hidden or stale paths make the whole capture inert, like other batch targets.
+    pub(super) fn mark_file_targets(
         &mut self,
         owner: Owner,
         paths: Vec<String>,
+        mode: ClipboardMode,
         cx: &mut Context<Self>,
     ) {
         if self.active_owner() != Some(owner) {
@@ -181,7 +236,32 @@ impl Workbench {
                 symlink: entry.symlink,
             })
             .collect();
-        pane.files.clipboard = Some(FileClipboard { owner, sources });
+        pane.files.clipboard = Some(FileClipboard {
+            id: Id::new_v4(),
+            owner,
+            mode,
+            sources,
+        });
+        cx.notify();
+    }
+    /// Drop this session's pending copy or move without touching any remote entry.
+    pub(super) fn cancel_file_clipboard(&mut self, owner: Owner, cx: &mut Context<Self>) {
+        if let Some(pane) = self.pane_mut(owner) {
+            pane.files.clipboard = None;
+        }
+        cx.notify();
+    }
+    /// Report a refused paste where the file panel shows it, without navigating.
+    pub(super) fn file_paste_refused(
+        &mut self,
+        owner: Owner,
+        message: String,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(pane) = self.pane_mut(owner) {
+            pane.files.error = Some(message.clone());
+        }
+        self.notice = Some(message);
         cx.notify();
     }
     pub(super) fn submit_file_operation(
@@ -199,23 +279,34 @@ impl Workbench {
                 .pane(origin.owner)
                 .is_some_and(|pane| origin.matches(pane))
         {
-            self.notice = Some(self.t("file_target_changed").into());
-            cx.notify();
+            let message = self.t("file_target_changed").to_string();
+            if modal {
+                self.notice = Some(message);
+                cx.notify();
+            } else {
+                // Pastes have no confirmation dialog; show the refusal in the panel.
+                self.file_paste_refused(origin.owner, message, cx);
+            }
             return;
         }
         let request = Id::new_v4();
         let owner = origin.owner;
+        let saving = self.t("saving");
         if let Some(pane) = self.pane_mut(owner) {
-            if let FileOperation::Rename(from, _) = &operation {
-                if pane
-                    .documents
+            let relocated = relocations(&operation);
+            if relocated.iter().any(|(from, _)| {
+                pane.documents
                     .iter()
                     .any(|doc| doc.saving && files::contains_path(from, &doc.original.path))
-                {
-                    self.notice = Some(self.t("saving").into());
-                    cx.notify();
-                    return;
+            }) {
+                if !modal {
+                    pane.files.error = Some(saving.into());
                 }
+                self.notice = Some(saving.into());
+                cx.notify();
+                return;
+            }
+            for (from, _) in &relocated {
                 pane.opened_requests
                     .retain(|_, (path, _)| !files::contains_path(from, path));
                 pane.open_latest
@@ -231,6 +322,12 @@ impl Workbench {
                 PendingFileOperation {
                     origin,
                     operation: operation.clone(),
+                    clipboard_id: match &operation {
+                        FileOperation::Move(..) => {
+                            pane.files.clipboard.as_ref().map(|clipboard| clipboard.id)
+                        }
+                        _ => None,
+                    },
                 },
             );
         }
@@ -248,6 +345,7 @@ impl Workbench {
         owner: Owner,
         request: Id,
         result: Result<(), String>,
+        moved: Vec<(String, String)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -261,10 +359,25 @@ impl Workbench {
         let refresh = self
             .pane(owner)
             .is_some_and(|pane| pending.origin.matches(pane));
-        if result.is_ok()
+        // A move batch reports what it really relocated even when another entry failed.
+        let move_total = match &pending.operation {
+            FileOperation::Move(sources, _) => Some(sources.len()),
+            _ => None,
+        };
+        let result = match (move_total, result) {
+            (Some(total), Err(error)) if !moved.is_empty() => Err(format!(
+                "{}: {}/{total}\n{error}",
+                self.t("move_partial"),
+                total - moved.len()
+            )),
+            (Some(_), Err(error)) => Err(format!("{}: {error}", self.t("move_failed"))),
+            (_, result) => result,
+        };
+        if (result.is_ok() || !moved.is_empty())
             && let Some(pane) = self.pane_mut(owner)
         {
-            if let FileOperation::Rename(from, to) = &pending.operation {
+            // Drafts follow every entry the server relocated (rename or move).
+            for (from, to) in &moved {
                 for document in &mut pane.documents {
                     if files::contains_path(from, &document.original.path) {
                         document.original.path =
@@ -276,8 +389,8 @@ impl Workbench {
                     .retain(|_, (path, _)| !files::contains_path(from, path));
                 pane.open_latest
                     .retain(|path, _| !files::contains_path(from, path));
-                pane.files.clipboard = None;
             }
+            pending.update_clipboard(&mut pane.files.clipboard, !moved.is_empty());
             pane.files.tree_children.clear();
             pane.files.tree_request = None;
             pane.files.tree_loading_path = None;
@@ -307,15 +420,113 @@ impl Workbench {
             self.notice = Some(error.clone());
         }
         if refresh {
-            if result.is_ok() {
+            if result.is_ok() || !moved.is_empty() {
                 self.navigate(owner, None, cx);
+                if move_total.is_some()
+                    && let Some(pane) = self.pane_mut(owner)
+                    && let Some(listing) = pane.files.request
+                {
+                    pane.files.after_listing = Some(ListingFollowUp {
+                        request: listing,
+                        select: moved.iter().map(|(_, to)| to.clone()).collect(),
+                        error: result.as_ref().err().cloned(),
+                    });
+                }
             } else if let Some(pane) = self.pane_mut(owner) {
                 pane.files.error = result.err();
             }
+        } else if move_total.is_some()
+            && let Err(error) = &result
+            && let Some(pane) = self.pane_mut(owner)
+        {
+            // The destination is no longer on screen; still surface the move report.
+            pane.files.error = Some(error.clone());
         }
         if close {
             self.cancel_modal(window, cx);
         }
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClipboardMode, FileClipboard, FileSnapshot, PendingFileOperation};
+    use crate::{
+        files,
+        model::{Id, Owner},
+        services::FileOperation,
+    };
+
+    fn clipboard(owner: Owner, mode: ClipboardMode) -> FileClipboard {
+        FileClipboard {
+            id: Id::new_v4(),
+            owner,
+            mode,
+            sources: vec![files::CopySource {
+                path: "/source/file.txt".into(),
+                directory: false,
+                symlink: false,
+            }],
+        }
+    }
+
+    fn pending_move(clipboard: &FileClipboard) -> PendingFileOperation {
+        PendingFileOperation {
+            origin: FileSnapshot {
+                owner: clipboard.owner,
+                directory: "/destination".into(),
+                listing: Some(Id::new_v4()),
+                hidden: false,
+                paths: Vec::new(),
+            },
+            operation: FileOperation::Move(clipboard.sources.clone(), "/destination".into()),
+            clipboard_id: Some(clipboard.id),
+        }
+    }
+
+    #[test]
+    fn move_receipt_preserves_new_copy_or_move_marks() {
+        let owner = Owner::new();
+        let original = clipboard(owner, ClipboardMode::Move);
+        let pending = pending_move(&original);
+        for mode in [ClipboardMode::Copy, ClipboardMode::Move] {
+            // Even marking the same paths again creates a new user intent.
+            let replacement = clipboard(owner, mode);
+            let replacement_id = replacement.id;
+            let mut current = Some(replacement);
+            pending.update_clipboard(&mut current, true);
+            let current = current.expect("an old receipt must preserve a later mark");
+            assert_eq!(current.id, replacement_id);
+            assert_eq!(current.mode, mode);
+        }
+    }
+
+    #[test]
+    fn move_receipt_consumes_its_buffer_only_after_something_moved() {
+        let original = clipboard(Owner::new(), ClipboardMode::Move);
+        let original_id = original.id;
+        let pending = pending_move(&original);
+        let mut current = Some(original);
+        pending.update_clipboard(&mut current, false);
+        assert_eq!(current.as_ref().unwrap().id, original_id);
+        pending.update_clipboard(&mut current, true);
+        assert!(current.is_none());
+        pending.update_clipboard(&mut current, true);
+        assert!(current.is_none());
+    }
+
+    #[test]
+    fn rename_receipt_keeps_existing_clipboard_invalidation() {
+        let original = clipboard(Owner::new(), ClipboardMode::Copy);
+        let mut pending = pending_move(&original);
+        pending.operation =
+            FileOperation::Rename("/source/file.txt".into(), "/source/new.txt".into());
+        pending.clipboard_id = None;
+        let mut current = Some(original);
+        pending.update_clipboard(&mut current, false);
+        assert!(current.is_some());
+        pending.update_clipboard(&mut current, true);
+        assert!(current.is_none());
     }
 }

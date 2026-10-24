@@ -154,7 +154,7 @@ macOS 的 `/var` 与 `/private/var` 必须统一为解析后的路径。`stage_t
 | [qa_terminal_boundaries.py](../scripts/qa_terminal_boundaries.py) | 自行启动 + Node.js；可传 `--shell` | 两种尺寸下不足/恰好/超出视口、首尾可达、清屏和 Vite 式刷新；Windows 必须指定 Git Bash，报告实际平台/Shell |
 | [qa_terminal_scroll_macos.py](../scripts/qa_terminal_scroll_macos.py) | 自行启动；另传 `--vite-cli <vite/bin/vite.js>`，需 Node.js/npm | 真实 Vite、隔离 zsh 右提示符、缩放、标签切换、溢出回滚和运行中清屏；记录网格、历史、滑块及外层滚动几何 |
 | [qa_file_rows_macos.py](../scripts/qa_file_rows_macos.py) | 现有窗口 + fixture | 单选、范围/增量选择、隐藏过滤、导航、键盘和批量确认；行事件含 session/attempt/request |
-| [qa_file_actions_macos.py](../scripts/qa_file_actions_macos.py) | 现有窗口 + fixture | 固定本行复制/删除、跨目录粘贴、冲突、旧 request/attempt 拒绝及重命名后草稿保存 |
+| [qa_file_actions_macos.py](../scripts/qa_file_actions_macos.py) | 现有窗口 + fixture | 固定本行复制/移动/删除、跨目录粘贴与移动、同目录/移入自身/冲突拒绝、取消待移动、旧 request/attempt 拒绝及重命名后草稿保存 |
 | [qa_editor_format_macos.py](../scripts/qa_editor_format_macos.py) | 现有窗口 + fixture | 真实 SFTP、Unicode 反向选区、滚动、独立撤销/重做、相邻输入、草稿收起和 IME 门禁；结果只导出内容哈希 |
 | [qa_transfers_macos.py](../scripts/qa_transfers_macos.py) | 现有窗口 + fixture；应用启动时设置 `MANTASH_QA_REMOTE_ROOT` | 多文件/目录、字节哈希、目标绑定、覆盖失败、重试、两个并发许可和取消 |
 | [qa_modal_widths_macos.py](../scripts/qa_modal_widths_macos.py) | 自行启动 | 中英文、12/14/18px、960×640/1280×800、各类弹窗与父帧恢复；等新 `dialog_revision` 后检查实际外框、中心误差 ≤1px、边距和正文溢出 |

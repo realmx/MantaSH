@@ -4,8 +4,8 @@ use dialogs::CloseTarget;
 use gpui_component::{IconName, InteractiveElementExt, Sizable, TitleBar, input::Input};
 use std::rc::Rc;
 use tools::{
-    FileMenuCopy, FileMenuDelete, FileMenuDownload, FileMenuEdit, FileMenuMkdir, FileMenuPaste,
-    FileMenuRename,
+    FileMenuCancelClipboard, FileMenuCopy, FileMenuDelete, FileMenuDownload, FileMenuEdit,
+    FileMenuMkdir, FileMenuMove, FileMenuPaste, FileMenuRename,
 };
 
 /// Render snapshot for one connection library row; `uniform_list` builds any
@@ -2591,11 +2591,19 @@ impl Render for Workbench {
                 this.choose_transfer(action.owner, false, true, w, cx);
             }))
             .on_action(cx.listener(|this, action: &FileMenuCopy, _, cx| {
-                this.copy_file_selection(action.owner, cx);
+                this.mark_file_selection(action.owner, ClipboardMode::Copy, cx);
+            }))
+            .on_action(cx.listener(|this, action: &FileMenuMove, _, cx| {
+                this.mark_file_selection(action.owner, ClipboardMode::Move, cx);
             }))
             .on_action(cx.listener(|this, action: &FileMenuPaste, _, cx| {
                 this.paste_file_clipboard(action.owner, cx);
             }))
+            .on_action(
+                cx.listener(|this, action: &FileMenuCancelClipboard, _, cx| {
+                    this.cancel_file_clipboard(action.owner, cx);
+                }),
+            )
             .on_action(cx.listener(|this, action: &FileMenuRename, w, cx| {
                 this.file_name_form(action.owner, true, w, cx);
             }))

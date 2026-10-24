@@ -366,6 +366,124 @@ fn path_components_and_shell_quoting_cannot_escape_targets() {
     assert_eq!(mantash::integration::quote("a'b$(pwd)"), "'a'\\''b$(pwd)'");
 }
 
+fn move_source(path: &str, directory: bool) -> mantash::files::CopySource {
+    mantash::files::CopySource {
+        path: path.into(),
+        directory,
+        symlink: false,
+    }
+}
+
+#[test]
+fn move_plan_maps_each_source_into_the_target_in_batch_order() {
+    use mantash::files::plan_move;
+    let sources = [
+        move_source("/srv/a/z.txt", false),
+        move_source("/srv/a/中文 folder", true),
+    ];
+    assert_eq!(
+        plan_move(&sources, "/srv/b").unwrap(),
+        vec![
+            ("/srv/a/z.txt".to_string(), "/srv/b/z.txt".to_string()),
+            (
+                "/srv/a/中文 folder".to_string(),
+                "/srv/b/中文 folder".to_string()
+            ),
+        ]
+    );
+    // The root and a trailing slash are valid destinations; a sibling sharing a
+    // prefix ("/srv/ab") is not a descendant of "/srv/a".
+    assert_eq!(
+        plan_move(&[move_source("/srv/a", true)], "/").unwrap(),
+        vec![("/srv/a".to_string(), "/a".to_string())]
+    );
+    assert_eq!(
+        plan_move(&[move_source("/srv/a", true)], "/srv/ab/").unwrap(),
+        vec![("/srv/a".to_string(), "/srv/ab/a".to_string())]
+    );
+}
+
+#[test]
+fn move_plan_refuses_same_directory_self_nesting_duplicates_and_bad_paths() {
+    use mantash::files::{MoveRejection, plan_move};
+    let file = move_source("/srv/a/z.txt", false);
+    let folder = move_source("/srv/a/folder", true);
+    assert_eq!(plan_move(&[], "/srv/b"), Err(MoveRejection::Empty));
+    assert_eq!(
+        plan_move(&[file.clone()], "/srv/a"),
+        Err(MoveRejection::SameDirectory)
+    );
+    assert_eq!(
+        plan_move(&[file.clone()], "/srv/a/"),
+        Err(MoveRejection::SameDirectory)
+    );
+    assert_eq!(
+        plan_move(&[move_source("/top", true)], "/"),
+        Err(MoveRejection::SameDirectory)
+    );
+    for target in [
+        "/srv/a/folder",
+        "/srv/a/folder/",
+        "/srv/a/folder/inner/deep",
+    ] {
+        assert_eq!(
+            plan_move(&[folder.clone()], target),
+            Err(MoveRejection::IntoItself("/srv/a/folder".into())),
+            "{target}"
+        );
+    }
+    assert_eq!(
+        plan_move(
+            &[
+                move_source("/srv/a/x", false),
+                move_source("/srv/c/x", false)
+            ],
+            "/srv/b"
+        ),
+        Err(MoveRejection::DuplicateName("x".into()))
+    );
+    for target in ["relative", "/srv/../etc", "/srv/a\\b", ""] {
+        assert!(
+            matches!(
+                plan_move(&[file.clone()], target),
+                Err(MoveRejection::InvalidPath(_))
+            ),
+            "{target}"
+        );
+    }
+    for source in ["/", "relative/x", "/srv/../x", "/srv/./x"] {
+        assert!(
+            matches!(
+                plan_move(&[move_source(source, false)], "/srv/b"),
+                Err(MoveRejection::InvalidPath(_))
+            ),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn move_conflicts_report_every_existing_destination_without_overwrite() {
+    use mantash::files::{move_conflicts, plan_move};
+    let plan = plan_move(
+        &[
+            move_source("/srv/a/keep.txt", false),
+            move_source("/srv/a/.hidden", false),
+            move_source("/srv/a/new", true),
+        ],
+        "/srv/b",
+    )
+    .unwrap();
+    // Hidden names count: the destination listing check includes entries the
+    // panel currently hides, so a filtered view cannot hide a collision.
+    let existing = ["/srv/b/keep.txt", "/srv/b/.hidden", "/srv/b/other"];
+    assert_eq!(
+        move_conflicts(&plan, |path| existing.contains(&path)),
+        vec!["/srv/b/keep.txt", "/srv/b/.hidden"]
+    );
+    assert!(move_conflicts(&plan, |_| false).is_empty());
+}
+
 #[test]
 fn empty_port_section_is_a_valid_empty_snapshot() {
     let sample = monitor::parse(

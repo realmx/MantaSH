@@ -61,6 +61,9 @@ pub enum Event {
         owner: Owner,
         request: Id,
         result: Result<(), String>,
+        /// `(from, to)` paths that really changed location (rename or move), even when
+        /// `result` reports a partial batch failure, so drafts follow every moved entry.
+        moved: Vec<(String, String)>,
     },
     Transfer(TransferRecord),
     Monitor {

@@ -507,6 +507,28 @@ pub fn text(language: Language, key: &str) -> &'static str {
             "目标已存在同名条目",
             "An entry with this name already exists",
         ),
+        "move" => ("移动", "Move"),
+        "move_here" => ("移动到此处", "Move here"),
+        "cancel_move" => ("取消移动", "Cancel move"),
+        "cancel_copy" => ("取消复制", "Cancel copy"),
+        "file_items" => ("项", "item(s)"),
+        "move_same_directory" => (
+            "条目已在当前目录，无需移动",
+            "These entries are already in this folder",
+        ),
+        "move_into_itself" => (
+            "不能把文件夹移动到它自身或其子目录中",
+            "A folder cannot be moved into itself or its subfolders",
+        ),
+        "move_duplicate" => (
+            "待移动的条目中有同名项",
+            "Two marked entries share the same name",
+        ),
+        "move_partial" => (
+            "部分条目未移动，失败",
+            "Some entries were not moved; failed",
+        ),
+        "move_failed" => ("移动失败", "Move failed"),
         "transfer_empty" => ("暂无传输记录", "No transfers yet"),
         "uploading" => ("上传中", "Uploading"),
         "downloading" => ("下载中", "Downloading"),

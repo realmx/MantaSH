@@ -93,7 +93,36 @@ class FileActionsAcceptance(FileRowsAcceptance):
         self.action("confirm_file_operation")
         self.wait(lambda s: s["modal"] is None and not self.pane(s)["file_loading"] and "b.txt" not in self.pane(s)["files"], "Delete completes only after its real operation receipt")
         self.check(not (remote / "b.txt").exists() and (remote / "c.txt").exists(), "Confirmed deletion affects only the reviewed row")
+        self.exercise_move(remote)
         print(json.dumps({"checks": len(self.results["checks"]), "report": str(self.report)}))
+
+    def exercise_move(self, remote):
+        (remote / "folder/inner").mkdir(parents=True)
+        (remote / "folder/inner/deep.txt").write_text("Owned deep file\n")
+        (remote / "destination/c.txt").write_text("Keep destination\n")
+        self.directory(remote)
+        self.direct("folder", "move")
+        operations = self.state()["file_operations"]
+        self.check(operations["clipboard"] == [str(remote / "folder")] and operations["clipboard_mode"] == "move", "Move row button marks a pending move")
+        self.action("paste_files")
+        self.wait(lambda s: s["file_operations"]["pending"] == 0 and self.pane(s)["file_error"], "Move into its own directory is refused visibly")
+        self.directory(remote / "folder/inner")
+        self.action("paste_files")
+        self.wait(lambda s: s["file_operations"]["pending"] == 0 and self.pane(s)["file_error"], "Folder cannot move into its own subfolder")
+        self.check((remote / "folder/inner/deep.txt").exists() and self.state()["file_operations"]["clipboard_mode"] == "move", "Refused moves change nothing and keep the pending move")
+        self.directory(remote / "destination")
+        self.action("paste_files")
+        self.wait(lambda s: s["file_operations"]["pending"] == 0 and "folder" in self.pane(s)["files"] and not self.pane(s)["file_loading"], "Move lands through real SFTP rename")
+        self.check((remote / "destination/folder/inner/deep.txt").read_text() == "Owned deep file\n" and not (remote / "folder").exists(), "Moved folder keeps its contents and leaves the source")
+        self.check(self.state()["file_operations"]["clipboard"] is None and self.selected() == ["folder"], "Successful move clears the pending move and selects what landed")
+        self.directory(remote)
+        self.direct("c.txt", "move")
+        self.directory(remote / "destination")
+        self.action("paste_files")
+        self.wait(lambda s: s["file_operations"]["pending"] == 0 and self.pane(s)["file_error"], "Move name conflict is refused")
+        self.check((remote / "destination/c.txt").read_text() == "Keep destination\n" and (remote / "c.txt").exists(), "Move conflict never overwrites the existing target")
+        self.action("cancel_file_clipboard")
+        self.check(self.state()["file_operations"]["clipboard"] is None, "Pending move can be cancelled")
 
 
 def main():

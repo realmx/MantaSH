@@ -62,7 +62,9 @@ mod file_actions;
 mod system;
 mod tab_reorder;
 mod tools;
-use file_actions::{FileAction, FileClipboard, FileSnapshot, PendingFileOperation};
+use file_actions::{
+    ClipboardMode, FileAction, FileClipboard, FileSnapshot, ListingFollowUp, PendingFileOperation,
+};
 mod transfer_paths;
 mod updates;
 mod window_actions;
@@ -176,10 +178,13 @@ pub(super) struct FileTool {
     /// Path of the tree node whose list load is pending; shows a spinner on that node.
     tree_loading_path: Option<String>,
     encoding: Option<crate::encoding::Encoding>,
-    /// Session-local copy buffer for the file context menu: source paths
-    /// captured by "copy", pasted with a remote `cp -R`. Never leaves the pane.
+    /// Session-local copy/move buffer: source paths captured by "copy" (pasted
+    /// with a remote `cp -R`) or "move" (pasted with SFTP RENAME). Never leaves the pane.
     clipboard: Option<FileClipboard>,
     pending: HashMap<Id, PendingFileOperation>,
+    /// Follow-up for one refresh request after a move: entries to select and an
+    /// error to keep visible once that exact listing arrives (see `ListingFollowUp`).
+    after_listing: Option<ListingFollowUp>,
 }
 pub(super) struct Document {
     owner: Owner,
@@ -994,6 +999,7 @@ impl Workbench {
                 encoding: None,
                 clipboard: None,
                 pending: HashMap::new(),
+                after_listing: None,
             },
             documents: vec![],
             active_document: None,
@@ -1174,6 +1180,7 @@ impl Workbench {
             pane.files.loaded = false;
             pane.files.clipboard = None;
             pane.files.pending.clear();
+            pane.files.after_listing = None;
             pane.opened_requests.clear();
             pane.open_latest.clear();
             for document in &mut pane.documents {
@@ -1794,6 +1801,28 @@ impl Workbench {
                                 }
                                 pane.files.selected.clear();
                                 pane.files.error = None;
+                                // A move's own refresh selects the entries it brought
+                                // here (visible ones only) and keeps a partial-failure
+                                // report on screen; any other listing drops it.
+                                if let Some(follow) = pane.files.after_listing.take()
+                                    && follow.request == request
+                                {
+                                    let show_hidden = pane.files.show_hidden;
+                                    let landed: Vec<String> = pane
+                                        .files
+                                        .entries
+                                        .iter()
+                                        .filter(|entry| {
+                                            (show_hidden || !entry.name.starts_with('.'))
+                                                && follow.select.contains(&entry.path)
+                                        })
+                                        .map(|entry| entry.path.clone())
+                                        .collect();
+                                    if !landed.is_empty() {
+                                        pane.files.selected.select_all(&landed);
+                                    }
+                                    pane.files.error = follow.error;
+                                }
                                 loaded_ok = true;
                             }
                             Err(error) => {
@@ -1969,7 +1998,8 @@ impl Workbench {
                 owner,
                 request,
                 result,
-            } => self.file_operation_receipt(owner, request, result, window, cx),
+                moved,
+            } => self.file_operation_receipt(owner, request, result, moved, window, cx),
             Event::Transfer(record) => {
                 let record_id = record.id;
                 if let Some(task) = self.transfers.iter_mut().find(|task| task.id == record_id) {

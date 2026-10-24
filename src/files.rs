@@ -259,6 +259,205 @@ pub async fn rename(remote: &Remote, from: &str, to: &str) -> Result<()> {
     Ok(())
 }
 
+/// Why a move batch is refused before any remote entry changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoveRejection {
+    /// Nothing was marked for moving.
+    Empty,
+    /// A source or the target is not an absolute path of valid components.
+    InvalidPath(String),
+    /// The target is the directory the sources already live in.
+    SameDirectory,
+    /// A directory would move into itself or one of its descendants.
+    IntoItself(String),
+    /// Two sources share a name, so both would land on one destination.
+    DuplicateName(String),
+    /// The destination already holds an entry with this name; it is never overwritten.
+    Exists(String),
+    /// The source vanished, changed type, or is a special file since it was marked.
+    SourceChanged(String),
+    /// The target is not a directory, or not the same directory once resolved.
+    TargetChanged,
+}
+impl std::fmt::Display for MoveRejection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => write!(f, "No move sources"),
+            Self::InvalidPath(path) => write!(f, "Unsafe or unsupported move path: {path:?}"),
+            Self::SameDirectory => write!(f, "Move target is the source directory"),
+            Self::IntoItself(path) => write!(
+                f,
+                "A directory cannot be moved into itself or its descendants: {path}"
+            ),
+            Self::DuplicateName(name) => write!(f, "Two move sources share the name {name:?}"),
+            Self::Exists(path) => write!(f, "Move target already exists: {path}"),
+            Self::SourceChanged(path) => {
+                write!(f, "Move source type changed or is unsupported: {path}")
+            }
+            Self::TargetChanged => write!(f, "Move target is not a regular directory"),
+        }
+    }
+}
+impl std::error::Error for MoveRejection {}
+
+/// Accept an absolute POSIX directory path, including `/`, made of valid components.
+fn valid_directory(path: &str) -> bool {
+    path.starts_with('/')
+        && path
+            .split('/')
+            .filter(|component| !component.is_empty())
+            .all(|component| valid_name(component).is_ok())
+}
+
+/// Plan a move batch lexically: one `(from, to)` pair per source, in batch order.
+///
+/// This pure check runs both in the UI (before submitting) and in the worker (before any
+/// rename). It rejects empty batches, invalid paths, a target equal to the sources' own
+/// directory, a directory moving into itself or a descendant, and duplicate destination
+/// names. Existing-name conflicts need the destination listing; see [`move_conflicts`].
+pub fn plan_move(
+    sources: &[CopySource],
+    target: &str,
+) -> std::result::Result<Vec<(String, String)>, MoveRejection> {
+    if sources.is_empty() {
+        return Err(MoveRejection::Empty);
+    }
+    if !valid_directory(target) {
+        return Err(MoveRejection::InvalidPath(target.into()));
+    }
+    let target_key = if target.trim_end_matches('/').is_empty() {
+        "/"
+    } else {
+        target.trim_end_matches('/')
+    };
+    let mut plan: Vec<(String, String)> = Vec::with_capacity(sources.len());
+    for source in sources {
+        if validate_delete_target(&source.path).is_err() {
+            return Err(MoveRejection::InvalidPath(source.path.clone()));
+        }
+        let from = source.path.trim_end_matches('/');
+        if parent(from) == target_key {
+            return Err(MoveRejection::SameDirectory);
+        }
+        if contains_path(from, target_key) {
+            return Err(MoveRejection::IntoItself(from.into()));
+        }
+        let name = from.rsplit('/').next().unwrap_or("");
+        let to = join(target_key, name).map_err(|_| MoveRejection::InvalidPath(from.into()))?;
+        if plan.iter().any(|(_, existing)| existing == &to) {
+            return Err(MoveRejection::DuplicateName(name.into()));
+        }
+        plan.push((from.into(), to));
+    }
+    Ok(plan)
+}
+
+/// Destinations of a planned move that already exist, as reported by `exists`.
+///
+/// The UI passes the destination listing (hidden entries included); the worker repeats the
+/// check against the server immediately before renaming, so nothing is ever overwritten.
+pub fn move_conflicts<'a>(
+    plan: &'a [(String, String)],
+    exists: impl Fn(&str) -> bool,
+) -> Vec<&'a str> {
+    plan.iter()
+        .map(|(_, to)| to.as_str())
+        .filter(|to| exists(to))
+        .collect()
+}
+
+/// Per-entry result of an executed move batch.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MoveReport {
+    /// `(from, to)` pairs that the server renamed.
+    pub moved: Vec<(String, String)>,
+    /// `(from, error)` for entries that were not moved after the batch passed preflight.
+    pub failed: Vec<(String, String)>,
+}
+
+/// `lstat`-based existence, so a dangling symlink still counts as an occupied name.
+async fn entry_exists(sftp: &SftpSession, path: &str) -> Result<bool> {
+    match sftp.symlink_metadata(path).await {
+        Ok(_) => Ok(true),
+        Err(russh_sftp::client::error::Error::Status(status))
+            if status.status_code == russh_sftp::protocol::StatusCode::NoSuchFile =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Move marked entries into `target` with SFTP RENAME, never overwriting.
+///
+/// The whole batch is preflighted first (lexical plan, frozen types, resolved containment,
+/// destination collisions); any rejection returns `Err` with nothing changed. Each entry is
+/// then renamed independently and re-checked for collisions just before its rename, so a
+/// later failure (permissions, cross-filesystem, race) is reported per entry in the
+/// [`MoveReport`] instead of hiding earlier successes. Preflight and rename are not atomic.
+pub async fn move_entries(
+    remote: &Remote,
+    sources: &[CopySource],
+    target: &str,
+) -> Result<MoveReport> {
+    let plan = plan_move(sources, target)?;
+    let sftp = remote.sftp().await?;
+    if !sftp.symlink_metadata(target).await?.file_type().is_dir() {
+        return Err(MoveRejection::TargetChanged.into());
+    }
+    let resolved_target = sftp.canonicalize(target).await?;
+    for (source, (from, to)) in sources.iter().zip(&plan) {
+        if remote.cancel.is_cancelled() {
+            bail!("Connection closed during move preflight");
+        }
+        let kind = match sftp.symlink_metadata(from.as_str()).await {
+            Ok(metadata) => metadata.file_type(),
+            Err(_) => return Err(MoveRejection::SourceChanged(from.clone()).into()),
+        };
+        if (!kind.is_file() && !kind.is_dir() && !kind.is_symlink())
+            || kind.is_symlink() != source.symlink
+            || kind.is_dir() != source.directory
+        {
+            return Err(MoveRejection::SourceChanged(from.clone()).into());
+        }
+        // Resolve the parent (never the entry itself, which may be a symlink) so a
+        // differently spelled path to the same directory is still a no-op move.
+        if sftp.canonicalize(parent(from)).await? == resolved_target {
+            return Err(MoveRejection::SameDirectory.into());
+        }
+        if kind.is_dir()
+            && contains_path(&sftp.canonicalize(from.as_str()).await?, &resolved_target)
+        {
+            return Err(MoveRejection::IntoItself(from.clone()).into());
+        }
+        if entry_exists(&sftp, to).await? {
+            return Err(MoveRejection::Exists(to.clone()).into());
+        }
+    }
+    let mut report = MoveReport::default();
+    for (from, to) in plan {
+        if remote.cancel.is_cancelled() {
+            report
+                .failed
+                .push((from, "Connection closed before move".into()));
+            continue;
+        }
+        let result = async {
+            if entry_exists(&sftp, &to).await? {
+                return Err(anyhow::Error::from(MoveRejection::Exists(to.clone())));
+            }
+            sftp.rename(from.as_str(), to.as_str()).await?;
+            Ok(())
+        }
+        .await;
+        match result {
+            Ok(()) => report.moved.push((from, to)),
+            Err(error) => report.failed.push((from, format!("{error:#}"))),
+        }
+    }
+    Ok(report)
+}
+
 /// Build one listing row from the attributes the same READDIR reply carried.
 ///
 /// Size, modification time and permission bits are copied as reported; a field the server

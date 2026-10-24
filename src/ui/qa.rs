@@ -370,6 +370,7 @@ pub enum Action {
     },
     ConfirmFileOperation,
     PasteFiles,
+    CancelFileClipboard,
     ToggleHiddenFiles,
     ReviewFileDelete,
     StageTransfer {
@@ -1683,6 +1684,7 @@ impl Workbench {
                 let action = match verb.as_str() {
                     "rename" => Some(FileAction::Rename),
                     "copy" => Some(FileAction::Copy),
+                    "move" => Some(FileAction::Move),
                     "delete" => Some(FileAction::Delete),
                     _ => None,
                 };
@@ -1706,6 +1708,11 @@ impl Workbench {
             Action::PasteFiles => {
                 if let Some(owner) = self.active_owner() {
                     self.paste_file_clipboard(owner, cx);
+                }
+            }
+            Action::CancelFileClipboard => {
+                if let Some(owner) = self.active_owner() {
+                    self.cancel_file_clipboard(owner, cx);
                 }
             }
             Action::ToggleHiddenFiles => {
@@ -2185,6 +2192,10 @@ impl Workbench {
         state["file_operations"] = self.active_pane().map(|pane| serde_json::json!({
             "pending":pane.files.pending.len(),
             "clipboard":pane.files.clipboard.as_ref().map(|clipboard| clipboard.sources.iter().map(|source| &source.path).collect::<Vec<_>>()),
+            "clipboard_mode":pane.files.clipboard.as_ref().map(|clipboard| match clipboard.mode {
+                ClipboardMode::Copy => "copy",
+                ClipboardMode::Move => "move",
+            }),
         })).unwrap_or_default();
         state["commit"] = serde_json::json!({"busy":self.modal_commit.busy(),"error":self.modal_commit.error,"committed":self.modal_commit.committed});
         state["editor"] = self.qa_editor(cx);

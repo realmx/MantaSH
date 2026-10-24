@@ -912,6 +912,7 @@ impl Backend {
     pub fn file_operation(&self, owner: Owner, request: Id, operation: FileOperation) {
         let backend = self.clone();
         self.runtime.spawn(async move {
+            let mut moved = Vec::new();
             let result = async {
                 let remote = backend.get_remote(owner)?;
                 match operation {
@@ -929,9 +930,25 @@ impl Backend {
                         }
                         sftp.create_dir(path).await?;
                     }
-                    FileOperation::Rename(from, to) => files::rename(&remote, &from, &to).await?,
+                    FileOperation::Rename(from, to) => {
+                        files::rename(&remote, &from, &to).await?;
+                        moved.push((from, to));
+                    }
                     FileOperation::Copy(sources, target) => {
                         files::copy(&remote, &sources, &target).await?
+                    }
+                    FileOperation::Move(sources, target) => {
+                        let report = files::move_entries(&remote, &sources, &target).await?;
+                        moved = report.moved;
+                        if !report.failed.is_empty() {
+                            // One line per entry that stayed put; successes travel in `moved`.
+                            let lines: Vec<String> = report
+                                .failed
+                                .iter()
+                                .map(|(path, error)| format!("{path}: {error}"))
+                                .collect();
+                            bail!("{}", lines.join("\n"));
+                        }
                     }
                 }
                 Ok::<_, anyhow::Error>(())
@@ -944,6 +961,7 @@ impl Backend {
                     owner,
                     request,
                     result,
+                    moved,
                 })
                 .await;
         });
@@ -1072,6 +1090,8 @@ pub enum FileOperation {
     Rename(String, String),
     /// Copy source entries verbatim into the target directory.
     Copy(Vec<files::CopySource>, String),
+    /// Move source entries into the target directory with SFTP RENAME, never overwriting.
+    Move(Vec<files::CopySource>, String),
 }
 
 /// Quote one path for a POSIX shell command line: single-quote wrapping with
