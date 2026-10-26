@@ -7,6 +7,7 @@ use base64::Engine;
 use mantash::{
     connections,
     encoding::{self, Encoding, TerminalDecoder},
+    files,
     model::*,
     monitor,
     storage::Database,
@@ -109,6 +110,24 @@ fn imports_preview_errors_and_preserve_existing_identity() {
     );
     let updated = connections::merge(std::slice::from_ref(&original), &preview, true);
     assert_eq!(updated[0].id, original.id);
+}
+
+#[test]
+fn text_open_allows_ansi_esc_and_rejects_nul_still() {
+    let ansi = "color\u{1b}[31mred\u{1b}[0m\n";
+    let decoded = encoding::decode_file(ansi.as_bytes(), None).unwrap();
+    assert!(decoded.text.contains('\u{1b}'));
+    assert!(encoding::decode_file(b"bin\0ary", None).is_err());
+    assert!(encoding::likely_text_name("app.log"));
+    assert!(!encoding::likely_text_name("app.png"));
+    assert_eq!(files::EDIT_LIMIT, 8_000_000);
+    let gbk = encoding::Encoding::Gbk.codec().encode("配置").0;
+    let (file, lossy) = encoding::decode_for_open(&gbk, "a.conf", None, false).unwrap();
+    assert!(!lossy);
+    assert_eq!(file.encoding, encoding::Encoding::Gbk);
+    assert!(encoding::decode_for_open(b"x\xffy", "a.conf", None, false).is_err());
+    let (_, lossy) = encoding::decode_for_open(b"x\xffy", "a.conf", None, true).unwrap();
+    assert!(lossy);
 }
 
 #[test]

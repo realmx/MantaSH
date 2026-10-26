@@ -8,6 +8,8 @@ use mantash::{
         drag_autoscroll_lines,
     },
 };
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 /// Merge only supplied damage into a retained frame, then compare with a complete read.
 fn assert_incremental(term: &mut TerminalBuffer, retained: &mut TerminalFrame) {
@@ -30,6 +32,46 @@ fn assert_incremental(term: &mut TerminalBuffer, retained: &mut TerminalFrame) {
             (b.row, b.col, &b.cell, b.selected, b.matched)
         );
     }
+}
+
+fn visible_lines(term: &TerminalBuffer) -> Vec<String> {
+    let frame = term.frame();
+    (0..frame.size.rows)
+        .map(|row| {
+            frame
+                .cells
+                .iter()
+                .filter(|cell| cell.row == row)
+                .map(|cell| cell.cell.c)
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+fn history_contains(term: &TerminalBuffer, needle: &str) -> bool {
+    let history = term.term.grid().history_size() as i32;
+    let cols = term.size.cols;
+    let mut lines = Vec::new();
+    for row in -history..0 {
+        let line: String = (0..cols)
+            .map(|col| {
+                term.term.grid()[alacritty_terminal::index::Point::new(
+                    alacritty_terminal::index::Line(row),
+                    alacritty_terminal::index::Column(col),
+                )]
+                .c
+            })
+            .collect::<String>()
+            .trim_end()
+            .to_owned();
+        if !line.is_empty() {
+            lines.push(line);
+        }
+    }
+    lines.iter().any(|line| line.contains(needle))
 }
 
 #[test]
@@ -552,4 +594,196 @@ fn shift_click_without_a_visible_selection_is_a_fallback() {
     term.select_start(6, 0, false);
     term.select_to(10, 0);
     assert_eq!(term.selected_text().unwrap(), "world");
+}
+
+#[test]
+fn prepare_reconnect_keeps_scrollback_and_viewport_in_history() {
+    let mut term = TerminalBuffer::new(Encoding::Utf8);
+    term.resize(20, 5);
+    // Fill the viewport and force prior lines into scrollback.
+    for i in 0..8 {
+        term.feed(format!("line-{i}\r\n").as_bytes());
+    }
+    let history_before = term.term.grid().history_size();
+    assert!(
+        history_before > 0,
+        "expected scrollback before reconnect prep"
+    );
+    assert!(
+        visible_lines(&term)
+            .iter()
+            .any(|line| line.contains("line-7")),
+        "latest line should be visible before prep: {:?}",
+        visible_lines(&term)
+    );
+
+    term.select_start(0, 0, false);
+    term.select_to(4, 0);
+    assert!(term.selected_text().is_some());
+    term.search("line");
+    assert!(!term.search_hits.is_empty());
+
+    term.prepare_reconnect();
+
+    assert!(
+        term.term.grid().history_size() > history_before,
+        "viewport should be pushed into scrollback"
+    );
+    assert!(
+        history_contains(&term, "line-7"),
+        "previous screen content must remain reachable in history"
+    );
+    assert!(
+        history_contains(&term, "line-0") || history_contains(&term, "line-1"),
+        "earlier scrollback must survive prepare_reconnect"
+    );
+    // Viewport is blank for the new shell; selection and search overlays are cleared.
+    assert!(
+        visible_lines(&term).is_empty(),
+        "viewport should be clear after prep: {:?}",
+        visible_lines(&term)
+    );
+    assert!(term.selected_text().is_none());
+    assert!(term.search_hits.is_empty());
+    assert!(!term.term.mode().contains(TermMode::ALT_SCREEN));
+
+    // New connection output continues on the preserved buffer.
+    term.feed(b"after-reconnect\r\n");
+    assert!(
+        visible_lines(&term)
+            .iter()
+            .any(|line| line.contains("after-reconnect")),
+        "{:?}",
+        visible_lines(&term)
+    );
+    assert!(
+        history_contains(&term, "line-7"),
+        "pre-reconnect content must still be scrollable after new output"
+    );
+}
+
+#[test]
+fn prepare_reconnect_exits_alternate_screen_before_preserving() {
+    let mut term = TerminalBuffer::new(Encoding::Utf8);
+    term.resize(20, 5);
+    term.feed(b"primary-before\r\n");
+    term.feed(b"\x1b[?1049h\x1b[2J\x1b[Halt-screen\r\n");
+    assert!(term.term.mode().contains(TermMode::ALT_SCREEN));
+
+    term.prepare_reconnect();
+
+    assert!(!term.term.mode().contains(TermMode::ALT_SCREEN));
+    assert!(
+        history_contains(&term, "primary-before"),
+        "primary scrollback must survive after leaving the alternate screen"
+    );
+    assert!(
+        visible_lines(&term).is_empty(),
+        "viewport should be clear for the new attempt: {:?}",
+        visible_lines(&term)
+    );
+}
+
+#[test]
+fn shared_terminal_buffer_survives_session_style_reconnect_transfer() {
+    // Mirrors Backend::start_with_terminal(Some(preserved)): the new attempt
+    // keeps the same Arc so history is not wiped when the view swaps.
+    let shared = Arc::new(Mutex::new(TerminalBuffer::new(Encoding::Utf8)));
+    {
+        let mut term = shared.lock();
+        term.resize(24, 6);
+        for i in 0..10 {
+            term.feed(format!("keep-{i}\r\n").as_bytes());
+        }
+    }
+    let history_before = shared.lock().term.grid().history_size();
+    assert!(history_before > 0);
+
+    shared.lock().prepare_reconnect();
+    let transferred = Arc::clone(&shared);
+    {
+        let mut term = transferred.lock();
+        assert!(term.term.grid().history_size() >= history_before);
+        assert!(history_contains(&term, "keep-9"));
+        term.feed(b"next-attempt\r\n");
+        assert!(
+            visible_lines(&term)
+                .iter()
+                .any(|line| line.contains("next-attempt"))
+        );
+        assert!(history_contains(&term, "keep-9"));
+    }
+    // Both handles observe the same grid.
+    assert!(Arc::ptr_eq(&shared, &transferred));
+    assert!(
+        history_contains(&shared.lock(), "keep-0") || history_contains(&shared.lock(), "keep-1")
+    );
+}
+
+#[test]
+fn prepare_reconnect_resets_modes_cursor_and_character_state() {
+    let mut term = TerminalBuffer::new(Encoding::Utf8);
+    term.resize(24, 6);
+    term.feed(b"preserved-output\r\n");
+    // A disconnected full-screen program can leave input modes, cursor shape,
+    // margins, attributes and a non-ASCII character set active.
+    term.feed(b"\x1b[?1000h\x1b[?1006h\x1b[?1h\x1b[?2004h\x1b[?25l");
+    term.feed(b"\x1b[2;4r\x1b[?6h\x1b[31;44m\x1b[6 q\x1b(0\x1b7");
+    let mut retained = term.frame();
+    term.take_frame_update(false);
+
+    term.prepare_reconnect();
+
+    assert_eq!(*term.term.mode(), TermMode::default());
+    assert_eq!(term.size.cols, 24);
+    assert_eq!(term.size.rows, 6);
+    assert!(history_contains(&term, "preserved-output"));
+    assert_eq!(term.term.grid().cursor.point.line.0, 0);
+    assert_eq!(term.term.grid().cursor.point.column.0, 0);
+    assert_incremental(&mut term, &mut retained);
+    assert_eq!(
+        terminal::key_bytes("up", false, false, false, *term.term.mode()),
+        Some(b"\x1b[A".to_vec())
+    );
+    assert_eq!(term.paste("hello").unwrap(), b"hello");
+
+    // Restoring the cursor must not restore the previous attempt's attributes.
+    term.feed(b"\x1b8qqq\r\nsecond\r\nthird\r\nfourth\r\nfifth");
+    let mut fresh = TerminalBuffer::new(Encoding::Utf8);
+    fresh.resize(24, 6);
+    fresh.feed(b"\x1b8qqq\r\nsecond\r\nthird\r\nfourth\r\nfifth");
+    assert_eq!(term.frame().cursor, fresh.frame().cursor);
+    for (actual, expected) in term.frame().cells.iter().zip(fresh.frame().cells.iter()) {
+        assert_eq!(actual.cell, expected.cell);
+    }
+}
+
+#[test]
+fn prepare_reconnect_drops_incomplete_escape_and_decode_sequences() {
+    for unfinished in [
+        b"\x1b]0;old-title".as_slice(),
+        b"\x1b[31;".as_slice(),
+        b"\xe4\xb8".as_slice(),
+    ] {
+        let mut term = TerminalBuffer::new(Encoding::Utf8);
+        term.resize(24, 6);
+        term.feed(b"keep-before\r\n");
+        term.feed(unfinished);
+        term.prepare_reconnect();
+        assert!(!term.feed(b"new-login\r\n"), "{unfinished:?}");
+        assert_eq!(visible_lines(&term), vec!["new-login"], "{unfinished:?}");
+        assert!(history_contains(&term, "keep-before"), "{unfinished:?}");
+    }
+}
+
+#[test]
+fn prepare_reconnect_drops_old_saved_history_erase_state() {
+    let mut term = TerminalBuffer::new(Encoding::Utf8);
+    term.resize(24, 6);
+    term.feed(b"keep-before\r\n\x1b[3J");
+    term.prepare_reconnect();
+    // ED2 from the new shell must not combine with ED3 from the old attempt.
+    term.feed(b"\x1b[2Jnew-login");
+    assert!(history_contains(&term, "keep-before"));
+    assert_eq!(visible_lines(&term), vec!["new-login"]);
 }

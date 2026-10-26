@@ -21,6 +21,7 @@ macro_rules! file_menu_actions {
     };
 }
 file_menu_actions!(
+    FileMenuPreview,
     FileMenuEdit,
     FileMenuDownload,
     FileMenuCopy,
@@ -192,7 +193,13 @@ impl Workbench {
             if directory {
                 self.navigate(owner, Some(path.to_owned()), cx);
             } else {
-                self.open_document(owner, path.to_owned(), window, cx);
+                self.open_document(
+                    owner,
+                    path.to_owned(),
+                    crate::files::OpenIntent::Auto,
+                    window,
+                    cx,
+                );
             }
         }
         cx.notify();
@@ -278,12 +285,14 @@ impl Workbench {
         &mut self,
         owner: Owner,
         path: String,
+        intent: crate::files::OpenIntent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.file_path_busy(owner, &path) {
             return;
         }
+        // A dirty edit draft always wins: never open a conflicting remote preview.
         if let Some(id) = self.pane(owner).and_then(|pane| {
             pane.documents
                 .iter()
@@ -294,6 +303,13 @@ impl Workbench {
         }) {
             if let Some(pane) = self.pane_mut(owner) {
                 pane.active_document = Some(id);
+                if let Some(document) = pane.documents.iter_mut().find(|document| document.id == id)
+                {
+                    // Promote an accidental preview flag off when the draft is dirty/editable.
+                    if document.dirty || document.saving {
+                        document.preview = false;
+                    }
+                }
             }
             self.show_modal(Modal::Editor { owner }, window, cx);
             return;
@@ -319,7 +335,7 @@ impl Workbench {
         let request = Id::new_v4();
         if let Some(pane) = self.pane_mut(owner) {
             pane.opened_requests
-                .insert(request, (path.clone(), existing_id));
+                .insert(request, (path.clone(), existing_id, intent));
             pane.open_latest.insert(path.clone(), request);
             if let Some(id) = existing_id {
                 if let Some(document) = pane.documents.iter_mut().find(|document| document.id == id)
@@ -329,7 +345,8 @@ impl Workbench {
                 pane.active_document = Some(id);
             }
         }
-        self.backend.open_file(owner, request, path, encoding);
+        self.backend
+            .open_file(owner, request, path, encoding, intent);
         if existing_id.is_some() {
             self.show_modal(Modal::Editor { owner }, window, cx);
             if let Some(document) = self.pane(owner).and_then(|pane| {
@@ -379,6 +396,7 @@ impl Workbench {
             }),
         );
         if let Some(pane) = self.pane_mut(owner) {
+            let preview = file.read_only;
             pane.documents.push(Document {
                 owner,
                 id,
@@ -387,6 +405,7 @@ impl Workbench {
                 encoding,
                 revision: 0,
                 dirty: false,
+                preview,
                 open_request: None,
                 reverting: false,
                 saving: false,
@@ -431,6 +450,7 @@ impl Workbench {
         }
         let input = document.input.clone();
         document.open_request = None;
+        document.preview = file.read_only;
         document.original = file.clone();
         document.encoding = file.encoding;
         document.revision = document.revision.wrapping_add(1);
@@ -482,7 +502,7 @@ impl Workbench {
         let Some(doc) = self.document_mut(owner, id) else {
             return;
         };
-        if doc.saving || (!doc.dirty && !force) {
+        if doc.preview || doc.original.lossy || doc.saving || (!doc.dirty && !force) {
             return;
         }
         doc.saving = true;
@@ -508,10 +528,18 @@ impl Workbench {
         }
         if let Some(pane) = self.pane_mut(owner) {
             // Keep the old draft until the replacement read actually succeeds.
-            pane.opened_requests
-                .insert(request, (path.clone(), Some(id)));
+            pane.opened_requests.insert(
+                request,
+                (path.clone(), Some(id), crate::files::OpenIntent::Edit),
+            );
             pane.open_latest.insert(path.clone(), request);
-            self.backend.open_file(owner, request, path, Some(encoding));
+            self.backend.open_file(
+                owner,
+                request,
+                path,
+                Some(encoding),
+                crate::files::OpenIntent::Edit,
+            );
         }
         cx.notify();
     }
@@ -1121,10 +1149,11 @@ impl Workbench {
         content = content.when_some(pane.files.error.clone(), |d, error| {
             d.child(div().px_3().py_2().text_color(p.error).child(error))
         });
-        if let Some((link, target, directory)) = &pane.files.link_target {
+        if let Some((link, target, directory, intent)) = &pane.files.link_target {
             let link = link.clone();
             let target = target.clone();
             let directory = *directory;
+            let intent = *intent;
             content = content.child(
                 div()
                     .p(px(theme::SPACE_PANEL))
@@ -1142,6 +1171,7 @@ impl Workbench {
                                         link: link.clone(),
                                         target: target.clone(),
                                         directory,
+                                        intent,
                                     },
                                     w,
                                     cx,
@@ -1213,15 +1243,12 @@ impl Workbench {
             .into_any_element()
         };
         let action_size = (ui + 6.).clamp(20., 26.);
-        // Rename, copy, move, download and delete: five buttons, four gaps.
-        const ROW_ACTIONS: f32 = 5.;
+        // Preview, rename, copy, move, download and delete: six buttons, five gaps.
+        const ROW_ACTIONS: f32 = 6.;
         let action_w = action_size * ROW_ACTIONS + theme::SPACE_SMALL * (ROW_ACTIONS - 1.);
         let panel = f32::from(pane.files.scroll.bounds().size.width);
-        let action_gap = if panel < 560. {
-            theme::SPACE_CONTROL
-        } else {
-            theme::SPACE_PANEL
-        };
+        // Fixed 4px between size → modified and modified → actions (theme::SPACE_SMALL).
+        let action_gap = theme::SPACE_SMALL;
         // The modified column keeps the same gap before it as the actions column.
         let overhead = theme::SPACE_PANEL * 2. + 18. + action_gap * 2.;
         let name_w = Some(
@@ -1538,14 +1565,18 @@ impl Workbench {
                                                         clipboard.mode == ClipboardMode::Move
                                                             && clipboard.sources.iter().any(|source| source.path == entry.path)
                                                     });
+                                                    let can_preview = !directory
+                                                        && entry.size.map_or(true, |n| n <= crate::files::EDIT_LIMIT);
                                                     let actions = div().flex().gap(px(theme::SPACE_SMALL)).children([
-                                                        ("rename", "icons/pencil.svg", FileAction::Rename),
-                                                        ("copy", "icons/copy.svg", FileAction::Copy),
-                                                        ("move", "icons/scissors.svg", FileAction::Move),
-                                                        ("download", "icons/download.svg", FileAction::Download),
-                                                        ("delete", "icons/trash-2.svg", FileAction::Delete),
-                                                    ].into_iter().map(|(key, icon, action)| {
+                                                        ("preview", "icons/eye.svg", FileAction::Preview, !can_preview),
+                                                        ("rename", "icons/pencil.svg", FileAction::Rename, false),
+                                                        ("copy", "icons/copy.svg", FileAction::Copy, false),
+                                                        ("move", "icons/scissors.svg", FileAction::Move, false),
+                                                        ("download", "icons/download.svg", FileAction::Download, false),
+                                                        ("delete", "icons/trash-2.svg", FileAction::Delete, false),
+                                                    ].into_iter().map(|(key, icon, action, row_disabled)| {
                                                         let target = entry.path.clone();
+                                                        let blocked = pane.files.loading || !pane.files.loaded || pane.state != ConnectionState::Connected || row_disabled;
                                                         div().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(
                                                         self.button(SharedString::from(format!("file-{key}-{}", entry.path)), "")
                                                             .when(key == "copy", |button| button.icon(IconName::Copy))
@@ -1554,7 +1585,7 @@ impl Workbench {
                                                             .when(key == "delete", |button| button.danger())
                                                             .when(key == "move", |button| button.selected(marked_move))
                                                             .tooltip(format!("{} · {}", self.t(key), entry.name))
-                                                            .disabled(pane.files.loading || !pane.files.loaded || pane.state != ConnectionState::Connected)
+                                                            .disabled(blocked)
                                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                                 cx.stop_propagation();
                                                                 this.file_direct_action(owner, listing_request, target.clone(), action, window, cx);
@@ -1709,8 +1740,18 @@ impl Workbench {
                                         gpui_component::menu::PopupMenu,
                                     >| {
                                         let this = entity.read(menu_cx);
-                                        let (busy, count, clipboard, editable) =
-                                            this.pane(owner).map_or((true, 0, None, false), |pane| {
+                                        let (busy, count, clipboard, editable, previewable) =
+                                            this.pane(owner).map_or((true, 0, None, false, false), |pane| {
+                                                let target = pane.files.edit_target();
+                                                let previewable = target.as_ref().is_some_and(|path| {
+                                                    pane.files.entries.iter().any(|entry| {
+                                                        entry.path == *path
+                                                            && !entry.directory
+                                                            && entry.size.map_or(true, |n| {
+                                                                n <= crate::files::EDIT_LIMIT
+                                                            })
+                                                    })
+                                                });
                                                 (
                                                     pane.files.loading
                                                         || pane.state
@@ -1721,7 +1762,8 @@ impl Workbench {
                                                         .as_ref()
                                                         .filter(|clipboard| clipboard.owner == owner)
                                                         .map(|clipboard| clipboard.mode),
-                                                    pane.files.edit_target().is_some(),
+                                                    target.is_some(),
+                                                    previewable,
                                                 )
                                             });
                                         let can_paste = clipboard.is_some();
@@ -1739,6 +1781,11 @@ impl Workbench {
                                         let no_targets = count == 0;
                                         let multi = count != 1;
                                         menu
+                                            .menu_with_disabled(
+                                                this.t("preview").to_string(),
+                                                Box::new(FileMenuPreview { owner }),
+                                                !previewable || busy,
+                                            )
                                             .menu_with_disabled(
                                                 this.t("edit").to_string(),
                                                 Box::new(FileMenuEdit { owner }),

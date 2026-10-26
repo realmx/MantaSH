@@ -170,14 +170,30 @@ impl Backend {
         secret: zeroize::Zeroizing<String>,
         remember_secret: bool,
     ) -> Arc<Session> {
+        self.start_with_terminal(owner, spec, secret, remember_secret, None)
+    }
+    /// Start a session, optionally reusing an existing terminal grid (SSH reconnect).
+    pub fn start_with_terminal(
+        &self,
+        owner: Owner,
+        spec: SessionSpec,
+        secret: zeroize::Zeroizing<String>,
+        remember_secret: bool,
+        terminal: Option<Arc<Mutex<TerminalBuffer>>>,
+    ) -> Arc<Session> {
         let (commands, receiver) = mpsc::unbounded_channel();
-        let session = Arc::new(Session {
-            owner,
-            terminal: Arc::new(Mutex::new(if matches!(spec, SessionSpec::Local { .. }) {
+        let terminal = terminal.unwrap_or_else(|| {
+            Arc::new(Mutex::new(if matches!(spec, SessionSpec::Local { .. }) {
                 TerminalBuffer::new_local(spec.encoding())
             } else {
                 TerminalBuffer::new(spec.encoding())
-            })),
+            }))
+        });
+        // Keep decoder state aligned with the session encoding after a reconnect.
+        terminal.lock().set_encoding(spec.encoding());
+        let session = Arc::new(Session {
+            owner,
+            terminal,
             spec,
             commands,
             cancel: CancellationToken::new(),
@@ -703,6 +719,12 @@ impl Backend {
         // that boundary with mismatched column counts.
         let _resize = session.resize_lock.lock();
         let mut terminal = session.terminal.lock();
+        // Reconnect can cancel this attempt while feed waits for either lock,
+        // then transfer the same grid to the next attempt. Recheck under the
+        // grid lock so no old bytes can cross that transfer boundary.
+        if session.cancel.is_cancelled() {
+            return;
+        }
         let malformed = terminal.feed(bytes);
         let events: Vec<_> = terminal.events.0.lock().drain(..).collect();
         // Mark under the grid lock: acknowledgement cannot race with unrecorded output.
@@ -840,6 +862,7 @@ impl Backend {
         request: Id,
         path: String,
         encoding: Option<crate::encoding::Encoding>,
+        intent: files::OpenIntent,
     ) {
         let backend = self.clone();
         self.runtime.spawn(async move {
@@ -858,10 +881,11 @@ impl Backend {
                     return;
                 }
             }
-            let result =
-                async { files::open(backend.get_remote(owner)?.as_ref(), &path, encoding).await }
-                    .await
-                    .map_err(|e| format!("{e:#}"));
+            let result = async {
+                files::open(backend.get_remote(owner)?.as_ref(), &path, encoding, intent).await
+            }
+            .await
+            .map_err(|e| format!("{e:#}"));
             let _ = backend
                 .events
                 .send(Event::FileOpened {
@@ -1098,4 +1122,65 @@ pub enum FileOperation {
 /// the embedded-quote escape, so no metacharacter in a name can break out.
 pub(crate) fn shell_quote(path: &str) -> String {
     format!("'{}'", path.replace('\'', "'\\''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancelled_feed_waiting_for_grid_cannot_mutate_reconnected_buffer() {
+        let directory = tempfile::tempdir().unwrap();
+        let (backend, _, _, _) = Backend::initialize_in(directory.path().into()).unwrap();
+        let (commands, _receiver) = mpsc::unbounded_channel();
+        let session = Arc::new(Session {
+            owner: Owner::new(),
+            spec: SessionSpec::Local {
+                shell: String::new(),
+                directory: String::new(),
+                encoding: crate::encoding::Encoding::Utf8,
+            },
+            terminal: Arc::new(Mutex::new(TerminalBuffer::new(
+                crate::encoding::Encoding::Utf8,
+            ))),
+            commands,
+            cancel: CancellationToken::new(),
+            remote: Mutex::new(None),
+            output_wakeup: Default::default(),
+            resize_lock: Arc::new(Mutex::new(())),
+        });
+        backend
+            .sessions
+            .lock()
+            .insert(session.owner.session, session.clone());
+        let mut terminal = session.terminal.lock();
+        terminal.feed(b"old-history\r\n");
+        let worker_backend = backend.clone();
+        let worker_session = session.clone();
+        let worker = std::thread::spawn(move || {
+            let mut history = HistoryParser::new("old-attempt".into());
+            worker_backend.feed(&worker_session, &mut history, b"stale-output");
+        });
+
+        // Holding the grid lock makes the race deterministic: once the worker
+        // holds resize_lock, it has passed its first cancellation check and is
+        // waiting to feed the old attempt into the shared grid.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !session.resize_lock.is_locked() {
+            assert!(
+                Instant::now() < deadline,
+                "feed did not reach the grid lock"
+            );
+            std::thread::yield_now();
+        }
+        backend.close(session.owner);
+        terminal.prepare_reconnect();
+        terminal.feed(b"new-attempt");
+        let revision = terminal.revision;
+        drop(terminal);
+        worker.join().unwrap();
+
+        assert_eq!(session.terminal.lock().revision, revision);
+        assert!(!session.output_wakeup.pending());
+    }
 }

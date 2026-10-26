@@ -4,6 +4,10 @@
 
 ## 当前源码变更
 
+- 文件列表名称后各列之间的间距固定为 4px（`theme::SPACE_SMALL`）：大小列到修改时间列、修改时间列到操作列不再随面板宽度在 8px/12px 间切换。
+- SFTP 文件列表增加行内预览（Lucide `eye`）与右键“预览/编辑”，动作列改为六个按钮（默认 140px）；放宽文本/日志/配置的打开检测（允许 ANSI ESC 等无害控制字符、扩展名与常见文件名允许列表，UTF-8 失败时尝试 GBK/GB18030，预览可用替换字符回退且不可保存），并区分只读预览与可编辑模式（脏草稿优先打开编辑草稿）。补充允许列表、控制字符、编码回退与预览门禁测试及文档。
+
+- SSH 原标签重连成功后保留窗口滚动历史与重连前画面（视口推入 scrollback 并复用同一 `TerminalBuffer`）；失败或取消仍显示原终端，新建 SSH 标签仍从空网格开始。
 - SFTP 文件列表新增移动文件/文件夹：行内“移动”按钮（Lucide `scissors`）或右键菜单标记后，导航到目标目录点击工具栏“移动到此处 (N)”，经 SFTP 重命名完成；工具栏同时显示待粘贴内容与取消按钮，复制也可在此粘贴或取消。拒绝同目录、移入自身或子目录、重名与已有同名目标（不覆盖），后台预检与逐项复检后执行，部分失败逐项报告；成功后刷新、选中移入条目、清除待移动内容并更新草稿路径，重连/关闭失效。行内动作列改为五个按钮（默认 116px），补充纯逻辑与真实 SFTP 测试、QA 场景和文档。
 - 本地终端每个标签的分屏上限由 5 个扩大到 10 个，支持左右、上下和混合布局；分屏按钮、操作边界与工作区恢复使用统一上限。补充十窗格创建、超限拒绝、关闭后补回及布局恢复测试，并同步 QA 脚本和使用文档。
 - 系统概览网络模块的两项速度由“下载/上传”改为“接收/发送”（英文 Received/Sent），与趋势图接收线、发送线及接口累计量的收发含义一致；SFTP 文件面板的上传、下载文案不变。
@@ -101,6 +105,64 @@ MantaSH 首个公开产品版本，包含：
 ## 逐次提交记录（自动生成）
 
 本区由提交前钩子按 Git 完整历史自动生成，随每次提交写入，覆盖到该提交的上一提交（最新一条在下次提交时补入）；包含普通提交、合并和文档更新，仅省略旧版 Actions 机器人的日志同步提交。日期为提交日期，正文保留原始说明，不代表对应版本已经发布或通过平台验收。
+
+### 2026-10-24
+
+- **Merge remote-tracking branch 'origin/dependabot/pip/pillow-13.0.0'** · [845664b](https://github.com/realmx/MantaSH/commit/845664b766345f7f137cd01f206bd50db4a553d9)
+
+### 2026-10-23
+
+- **chore(deps): bump pillow from 12.3.0 to 13.0.0** · [833589b](https://github.com/realmx/MantaSH/commit/833589bdc567f58b6db767d8fd7e487bcfc577f1)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+Bumps [pillow](https://github.com/python-pillow/Pillow) from 12.3.0 to 13.0.0.
+- [Release notes](https://github.com/python-pillow/Pillow/releases)
+- [Changelog](https://github.com/python-pillow/Pillow/blob/main/CHANGES.rst)
+- [Commits](https://github.com/python-pillow/Pillow/compare/12.3.0...13.0.0)
+
+---
+updated-dependencies:
+- dependency-name: pillow
+  dependency-version: 13.0.0
+  dependency-type: direct:production
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+```
+
+</details>
+
+### 2026-10-24
+
+- **SFTP 文件支持移动与待粘贴操作** · [fa5e280](https://github.com/realmx/MantaSH/commit/fa5e28076f302c1ac192350bf6911711273995d9)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+新增文件与文件夹的行内及右键移动操作，通过 SFTP 重命名批量移动；复制和移动共用会话内缓冲，工具栏显示条目数、粘贴或移动到此处以及取消操作。
+
+在界面和后台校验同目录、移入自身、无效路径、类型变化及重名冲突，保留已完成项并逐项报告失败。按实际移动回执更新草稿路径、刷新目录及选中移入条目；移动回执绑定标记 UUID，避免清除用户后来标记的新缓冲。
+
+补充路径规划、真实 SFTP 移动和缓冲回执竞态测试，扩展 macOS QA 场景，同步中英文 README、功能、使用、数据、架构、设计、开发与验收文档，并添加 Lucide 图标。更新日志生成区由提交前钩子维护。
+
+验证通过：
+- cargo fmt --all -- --check
+- cargo test --locked --no-default-features --all-targets
+- cargo check --locked --no-default-features --all-targets
+- cargo check --locked --all-targets
+- cargo test --locked --lib ui::file_actions::tests
+- python3 scripts/check_docs.py
+- Python AST 语法检查：scripts/qa_file_actions_macos.py
+- git diff --check
+
+本次未运行原生窗口 QA、指针/键盘驱动验收、Windows 实机或新增 Linux 远程验证。原生 UI fixture 按默认配置忽略；编译仍有现有未使用项、依赖弃用及未来兼容警告。
+```
+
+</details>
 
 ### 2026-10-23
 

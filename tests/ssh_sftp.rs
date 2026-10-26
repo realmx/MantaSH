@@ -613,7 +613,9 @@ async fn real_sftp_edit_last_write_wins_and_directory_transfer() {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
     let (_, entries) = files::list(&remote, &root).await.unwrap();
     assert!(entries.iter().any(|e| e.name == "hello.txt"));
-    let document = files::open(&remote, &path, None).await.unwrap();
+    let document = files::open(&remote, &path, None, files::OpenIntent::Edit)
+        .await
+        .unwrap();
     assert_eq!(document.text, "initial 中文\n");
     assert!(matches!(
         files::save(&remote, &document, "edited 中文\n", Encoding::Utf8, false)
@@ -643,7 +645,9 @@ async fn real_sftp_edit_last_write_wins_and_directory_transfer() {
     // session: the read must observe the newest bytes rather than a cached
     // editor document.
     tokio::fs::write(&path, "vi latest 中文\n").await.unwrap();
-    let reopened = files::open(&remote, &path, None).await.unwrap();
+    let reopened = files::open(&remote, &path, None, files::OpenIntent::Edit)
+        .await
+        .unwrap();
     assert_eq!(reopened.text, "vi latest 中文\n");
     assert!(matches!(
         files::save(
@@ -661,7 +665,9 @@ async fn real_sftp_edit_last_write_wins_and_directory_transfer() {
         tokio::fs::read_to_string(&path).await.unwrap(),
         "editor final 中文\n"
     );
-    let final_read = files::open(&remote, &path, None).await.unwrap();
+    let final_read = files::open(&remote, &path, None, files::OpenIntent::Edit)
+        .await
+        .unwrap();
     assert_eq!(final_read.text, "editor final 中文\n");
     let source = tempfile::tempdir().unwrap();
     tokio::fs::create_dir(source.path().join("nested"))
@@ -819,9 +825,14 @@ async fn sftp_failed_save_and_cancel_preserve_original_bytes() {
     let remote = fixture.connected().await;
     let path = fixture._directory.path().join("protected.txt");
     std::fs::write(&path, "original").unwrap();
-    let document = files::open(&remote, &path.to_string_lossy(), None)
-        .await
-        .unwrap();
+    let document = files::open(
+        &remote,
+        &path.to_string_lossy(),
+        None,
+        files::OpenIntent::Edit,
+    )
+    .await
+    .unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
     assert!(
         files::save(&remote, &document, "new draft", Encoding::Utf8, false)
@@ -842,9 +853,14 @@ async fn sftp_failed_save_and_cancel_preserve_original_bytes() {
     );
     assert!(!resolved.1);
     assert!(
-        files::open(&remote, &link.to_string_lossy(), None)
-            .await
-            .is_err()
+        files::open(
+            &remote,
+            &link.to_string_lossy(),
+            None,
+            files::OpenIntent::Edit
+        )
+        .await
+        .is_err()
     );
     files::delete(
         &remote,

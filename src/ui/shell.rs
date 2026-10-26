@@ -5,7 +5,7 @@ use gpui_component::{IconName, InteractiveElementExt, Sizable, TitleBar, input::
 use std::rc::Rc;
 use tools::{
     FileMenuCancelClipboard, FileMenuCopy, FileMenuDelete, FileMenuDownload, FileMenuEdit,
-    FileMenuMkdir, FileMenuMove, FileMenuPaste, FileMenuRename,
+    FileMenuMkdir, FileMenuMove, FileMenuPaste, FileMenuPreview, FileMenuRename,
 };
 
 /// Render snapshot for one connection library row; `uniform_list` builds any
@@ -1560,7 +1560,8 @@ impl Workbench {
                 Input::new(&doc.input)
                     .h_full()
                     .appearance(false)
-                    .bordered(false),
+                    .bordered(false)
+                    .disabled(doc.preview),
             )
             .into_any_element()
     }
@@ -1587,17 +1588,25 @@ impl Workbench {
         let id = doc.id;
         let doc_owner = doc.owner;
         // The header carries the full path, so the footer omits the file
-        // name; the dirty marker and save/disconnect feedback stay visible.
+        // name; the dirty marker and save/disconnect/preview feedback stay visible.
+        let preview = doc.preview;
+        let error_status = doc.error.is_some()
+            || doc.owner != pane.owner
+            || pane.state != ConnectionState::Connected;
         let status = doc.error.clone().or_else(|| {
             if doc.owner != pane.owner || pane.state != ConnectionState::Connected {
                 Some(self.t("editor_disconnected").to_string())
+            } else if preview && doc.original.lossy {
+                Some(self.t("preview_lossy").to_string())
+            } else if preview {
+                Some(self.t("preview_readonly").to_string())
             } else {
                 None
             }
         });
         let has_status = status.is_some();
         footer = footer
-            .when(doc.dirty, |row| {
+            .when(doc.dirty && !preview, |row| {
                 row.child(
                     div()
                         .whitespace_nowrap()
@@ -1613,35 +1622,37 @@ impl Workbench {
                         .overflow_hidden()
                         .text_ellipsis()
                         .whitespace_nowrap()
-                        .text_color(p.error)
+                        .text_color(if error_status { p.error } else { p.muted })
                         .child(status),
                 )
             })
             .when(!has_status, |row| row.child(div().flex_1()))
-            .child(
-                self.button("discard-draft", self.t("discard_draft"))
-                    .danger()
-                    .disabled(doc.saving || !doc.dirty)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.request_close(CloseTarget::Document(owner, id), window, cx)
+            .when(!preview, |row| {
+                row.child(
+                    self.button("discard-draft", self.t("discard_draft"))
+                        .danger()
+                        .disabled(doc.saving || !doc.dirty)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.request_close(CloseTarget::Document(owner, id), window, cx)
+                        })),
+                )
+                .child(
+                    self.button(
+                        ("save-document", id.as_u128() as u64),
+                        self.t(if doc.saving { "saving" } else { "save" }),
+                    )
+                    .success()
+                    .tooltip(self.t("save_overwrites"))
+                    .disabled(
+                        doc.saving
+                            || doc.owner != pane.owner
+                            || pane.state != ConnectionState::Connected,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.save_document(doc_owner, id, false, cx)
                     })),
-            )
-            .child(
-                self.button(
-                    ("save-document", id.as_u128() as u64),
-                    self.t(if doc.saving { "saving" } else { "save" }),
                 )
-                .success()
-                .tooltip(self.t("save_overwrites"))
-                .disabled(
-                    doc.saving
-                        || doc.owner != pane.owner
-                        || pane.state != ConnectionState::Connected,
-                )
-                .on_click(
-                    cx.listener(move |this, _, _, cx| this.save_document(doc_owner, id, false, cx)),
-                ),
-            );
+            });
         footer
     }
     fn layout_minimum(&self, node: &PaneLayout) -> Size<f32> {
@@ -2577,6 +2588,20 @@ impl Render for Workbench {
             }))
             // File-list context menu: actions carry their owning pane so a
             // menu left open across a tab switch cannot hit the wrong pane.
+            .on_action(cx.listener(|this, action: &FileMenuPreview, w, cx| {
+                if let Some(path) = this
+                    .pane(action.owner)
+                    .and_then(|pane| pane.files.edit_target())
+                {
+                    this.open_document(
+                        action.owner,
+                        path,
+                        crate::files::OpenIntent::Preview,
+                        w,
+                        cx,
+                    );
+                }
+            }))
             .on_action(cx.listener(|this, action: &FileMenuEdit, w, cx| {
                 // Re-resolve the single-file target at execution time; a menu
                 // left open across selection or directory changes stays inert.
@@ -2584,7 +2609,7 @@ impl Render for Workbench {
                     .pane(action.owner)
                     .and_then(|pane| pane.files.edit_target())
                 {
-                    this.open_document(action.owner, path, w, cx);
+                    this.open_document(action.owner, path, crate::files::OpenIntent::Edit, w, cx);
                 }
             }))
             .on_action(cx.listener(|this, action: &FileMenuDownload, w, cx| {

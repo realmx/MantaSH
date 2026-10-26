@@ -1651,7 +1651,7 @@ impl Workbench {
             }
             Action::Open { path } => {
                 if let Some(owner) = self.active_owner() {
-                    self.open_document(owner, path, window, cx);
+                    self.open_document(owner, path, crate::files::OpenIntent::Auto, window, cx);
                 }
             }
             Action::FileRow {
@@ -1682,6 +1682,7 @@ impl Workbench {
                 verb,
             } => {
                 let action = match verb.as_str() {
+                    "preview" => Some(FileAction::Preview),
                     "rename" => Some(FileAction::Rename),
                     "copy" => Some(FileAction::Copy),
                     "move" => Some(FileAction::Move),
@@ -1941,7 +1942,8 @@ impl Workbench {
             serde_json::json!({"sha256": format!("{:x}", Sha256::digest(text.as_bytes())), "bytes": text.len(),
                 "selection": [view.selection.start, view.selection.end], "reversed": view.reversed,
                 "scroll_y": f32::from(view.scroll.y), "formatting": doc.formatting.is_some(),
-                "dirty": doc.dirty, "revision": doc.revision, "error": doc.error})
+                "dirty": doc.dirty, "preview": doc.preview, "lossy": doc.original.lossy,
+                "revision": doc.revision, "error": doc.error})
         }).unwrap_or(serde_json::Value::Null)
     }
 

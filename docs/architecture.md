@@ -16,7 +16,7 @@ MantaSH 是原生 Rust/GPUI 桌面应用。GPUI 管理视图、焦点与绘制�
 | SSH 与凭据 | `ssh.rs`：握手、主机验证、密码认证和通道；`credentials.rs`：`SecretStore`、一次性凭据回复；`vault.rs`：`LocalVault` |
 | 终端 | `terminal.rs`：`TerminalBuffer` 与 ANSI 网格；`terminal_io.rs`：`OutputWakeup`、PTY 尺寸提交、输入增量；`terminal_paint.rs`：稀疏绘制数据；`ui/terminal_view.rs`：原生输入和网格视图 |
 | Shell 元数据与历史 | `integration.rs`：Shell 集成；`titles.rs`：标题；`command_cursor.rs`：提示符定位；`model/history.rs`：`HistoryItem`、`HistoryCatalog`；`ui/history.rs`：固定提交目标 |
-| 文件、编辑和传输 | `files.rs`：SFTP、保护式保存、传输；`encoding.rs`：严格转码、BOM 与二进制判定；`file_selection.rs`：路径选区；`editor_format.rs`：格式化及 UTF-8 选区映射；`ui/file_actions.rs`、`ui/editor.rs`、`ui/transfer_paths.rs`：操作快照、`Document` 交互和路径展示 |
+| 文件、编辑和传输 | `files.rs`：SFTP、`OpenIntent` 打开/预览、保护式保存、传输；`encoding.rs`：严格转码、文本允许列表、控制字符策略、BOM 与回退解码；`file_selection.rs`：路径选区；`editor_format.rs`：格式化及 UTF-8 选区映射；`ui/file_actions.rs`、`ui/editor.rs`、`ui/transfer_paths.rs`：操作快照、`Document` 预览/编辑交互和路径展示 |
 | Linux 系统工具 | `monitor.rs`、`monitor_history.rs`：采样、差值、有限趋势窗口；`processes.rs`：`Identity`、`Action`、`Outcome`；`port_view.rs`：端口解析和排序；`ui/system.rs`、`ui/ports.rs`：所属会话视图 |
 | 工作台与弹窗 | `ui/mod.rs`：`Workbench`、`Pane`、`Document`；`ui/shell.rs`、`ui/tools.rs`：布局；`ui/dialogs.rs`：`Modal`、`ModalFrame`；`ui/commits.rs`：`CommitState`；`ui/tab_reorder.rs`、`ui/connection_reorder.rs`：排序手势 |
 | 统一控件与平台 | `ui/controls.rs`、`ui/theme.rs`、`ui/settings.rs`、`ui/i18n.rs`：控件、颜色、偏好和文案；`platform.rs`：路径与 Shell；`window_layout.rs`、`ui/window_actions.rs`、`ui/window_native.rs`、`ui/macos_titlebar.rs`、`ui/windows_caption.rs`：窗口适配 |
@@ -45,7 +45,7 @@ MantaSH 是原生 Rust/GPUI 桌面应用。GPUI 管理视图、焦点与绘制�
 
 SSH 顺序为 TCP/SSH 握手、主机公钥验证、读取或请求密码、密码认证、PTY/Shell。新主机或指纹变化通过带 Owner 的一次性回复确认；关闭、取消或握手超时后，旧回复不能批准新的尝试。终端、SFTP 和监控使用同一 SSH transport 的独立通道，不共用标准输出；SFTP 首次使用时懒加载，失败可重试而不销毁终端。
 
-凭据缺失、读取失败或认证拒绝产生 `Credentials` 事件并进入 `CredentialsRequired`。请求按 Owner 排队，用户切入所属窗格后再显示；拒绝后等待更正，不自动循环认证。新输入的密码仅在认证成功后后台保存，`CredentialStorage` 单独反馈保存失败，已成功认证的会话继续运行；使用已保存值成功连接不重复写入。`Pane.pending_terminal` 在本次连接成功后才替换显示终端，失败和取消保留原显示。
+凭据缺失、读取失败或认证拒绝产生 `Credentials` 事件并进入 `CredentialsRequired`。请求按 Owner 排队，用户切入所属窗格后再显示；拒绝后等待更正，不自动循环认证。新输入的密码仅在认证成功后后台保存，`CredentialStorage` 单独反馈保存失败，已成功认证的会话继续运行；使用已保存值成功连接不重复写入。`Pane.pending_terminal` 在本次连接成功后才替换显示终端，失败和取消保留原显示。SSH 原标签重连会复用既有 `TerminalBuffer`：关闭旧 attempt 后将主屏当前视口推入 scrollback，并把保留历史的网格移交给相同尺寸的新终端状态，重置 ANSI/解码器、模式、当前与保存光标、字符集、滚动区域和旧事件；后台 feed 在持有网格锁后再次复核取消，旧 attempt 等锁期间留下的字节不能写入重连后的网格。新 Session 因此仍可滚动查看重连前的输出；新建 SSH 标签仍从空网格开始。
 
 ## 终端与历史
 
@@ -99,7 +99,7 @@ Unix 本地 PTY 使用单一非阻塞 I/O 循环：先排空旧宽度输出，�
 
 目录列表由 `files::listing_entry` 从同一 READDIR 回复的属性复制类型、大小、mtime 与权限，缺失字段保持 `None`，不为每行另发 stat；界面经 `files::format_modified` 把 mtime 按本机时区格式化为 `YYYY-MM-DD HH:mm:ss`，未知值显示“—”。`files::sort_entries` 按 `FileSort`（默认，或大小/修改时间的降序、升序）原地排列 `FileTool.entries`：目录始终在前，未知值两向都排最后，同值按名称；排序状态只存在于该面板内存，目录回执到达时按当前排序重排，因此 `visible_paths`、Shift 范围和方向键都使用显示顺序，按路径保存的选区不受重排影响。文件行事件携带 Owner 与目录 request；`file_selection` 只保存当前视图的完整路径、范围起点和键盘终点，不持久化。目录成功更换或刷新后清空选区；行按钮固定本行，批量确认固定路径集合。`ui/file_actions.rs` 用 `FileSnapshot` 与独立操作 UUID 分开处理目录和操作回执。复制来源限制同一 Owner/attempt，可导航到目标目录；重命名与关联读取/保存互斥，成功更新文档路径且只刷新仍匹配的目录。后端复核类型、包含关系和冲突，复制依赖远端 POSIX `cp`。移动与复制共用 `FileClipboard`（`ClipboardMode::{Copy, Move}`，标记即替换），粘贴前由纯函数 `files::plan_move` 词法拒绝空集、无效路径、同目录、移入自身/子目录与批内重名，`files::move_conflicts` 对照当前完整列表（含隐藏项）拒绝冲突；`FileOperation::Move` 再由 `files::move_entries` 在后台全量预检（目标为目录、规范化路径、类型与标记一致、拒绝特殊文件、包含关系、`lstat` 目标不存在）后逐项复检并执行 SFTP RENAME，取消或单项失败只影响剩余/该项，回执 `Event::FileOperation.moved` 返回实际完成的路径对。`relocations` 统一给出重命名与移动的路径映射，用于与读取/保存互斥及成功后更新草稿；每次标记分配独立缓冲 UUID，移动请求保存所属缓冲 UUID，回执仅消费该缓冲，不清除期间重新标记的复制/移动来源；移动回执刷新目录，并以 `ListingFollowUp` 绑定新目录请求 ID，在该列表回执到达时选中移入条目并保留逐项错误。
 
-`Document` 固定原 Owner、文档 ID、路径、编码/BOM、内容基线和 revision；重连不重绑草稿。读取只接受最新 request，保存携带内容与版本快照，仅当前版本成功才清除 dirty。后端先严格编码并重新读取目标，确认仍为可读普通文件，再写同目录临时文件，以唯一恢复文件保护原内容后按最后保存覆盖；远端内容变化本身不拒绝保存，失败保留草稿和恢复路径。编辑器行列定位也先核对原 Owner/ID，再调用原生 `InputState`，不修改文本。
+`Document` 固定原 Owner、文档 ID、路径、编码/BOM、内容基线、revision 与 preview/lossy；重连不重绑草稿。读取只接受最新 request（携带 `OpenIntent`），保存携带内容与版本快照，仅当前版本成功才清除 dirty；预览与 lossy 文档拒绝保存。后端先严格编码并重新读取目标，确认仍为可读普通文件，再写同目录临时文件，以唯一恢复文件保护原内容后按最后保存覆盖；远端内容变化本身不拒绝保存，失败保留草稿和恢复路径。编辑器行列定位也先核对原 Owner/ID，再调用原生 `InputState`，不修改文本。
 
 `editor_format.rs` 在后台一次映射两个 UTF-8 选区端点。`ui/editor.rs` 应用前核对 revision、文本、IME 和视图状态；组件本地补丁以显式编辑事务设置前后撤销边界，恢复正向/反向选区与滚动，使格式化可独立撤销/重做。补丁范围见[开发指南](development.md#依赖与本地补丁)。
 

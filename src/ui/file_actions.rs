@@ -84,6 +84,7 @@ pub(super) struct ListingFollowUp {
 }
 #[derive(Clone, Copy)]
 pub(super) enum FileAction {
+    Preview,
     Rename,
     Copy,
     Move,
@@ -165,6 +166,9 @@ impl Workbench {
             return;
         }
         match action {
+            FileAction::Preview => {
+                self.open_document(owner, path, crate::files::OpenIntent::Preview, window, cx)
+            }
             FileAction::Rename => self.file_name_target(origin, Some(path), window, cx),
             FileAction::Copy => self.mark_file_targets(owner, vec![path], ClipboardMode::Copy, cx),
             FileAction::Move => self.mark_file_targets(owner, vec![path], ClipboardMode::Move, cx),
@@ -308,7 +312,7 @@ impl Workbench {
             }
             for (from, _) in &relocated {
                 pane.opened_requests
-                    .retain(|_, (path, _)| !files::contains_path(from, path));
+                    .retain(|_, (path, _, _)| !files::contains_path(from, path));
                 pane.open_latest
                     .retain(|path, _| !files::contains_path(from, path));
                 for doc in &mut pane.documents {
@@ -386,7 +390,7 @@ impl Workbench {
                     }
                 }
                 pane.opened_requests
-                    .retain(|_, (path, _)| !files::contains_path(from, path));
+                    .retain(|_, (path, _, _)| !files::contains_path(from, path));
                 pane.open_latest
                     .retain(|path, _| !files::contains_path(from, path));
             }

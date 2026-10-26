@@ -3,6 +3,26 @@ use super::*;
 use gpui::EntityInputHandler;
 
 impl Workbench {
+    /// Switch a safe (non-lossy) preview into the editable editor without re-fetching.
+    pub(super) fn promote_preview_to_edit(
+        &mut self,
+        owner: Owner,
+        id: Id,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(doc) = self.document_mut(owner, id) else {
+            return;
+        };
+        if !doc.preview || doc.original.lossy {
+            return;
+        }
+        doc.preview = false;
+        doc.original.read_only = false;
+        let input = doc.input.clone();
+        input.focus_handle(cx).focus(window);
+        cx.notify();
+    }
     pub(super) fn format_document(
         &mut self,
         owner: Owner,
@@ -13,7 +33,7 @@ impl Workbench {
         let Some(doc) = self.document_mut(owner, id) else {
             return;
         };
-        if doc.formatting.is_some() || doc.saving {
+        if doc.preview || doc.original.lossy || doc.formatting.is_some() || doc.saving {
             return;
         }
         let input = doc.input.clone();
@@ -89,10 +109,13 @@ impl Workbench {
         };
         let id = doc.id;
         let doc_owner = doc.owner;
+        let preview = doc.preview;
+        let can_edit = preview && !doc.original.lossy;
         toolbar = toolbar
             .child(div().flex_1().min_w_0().child(doc.original.path.clone()))
             .child(
                 self.button("editor-encoding", doc.encoding.label())
+                    .disabled(preview)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.show_modal(
                             Modal::Encoding {
@@ -104,14 +127,26 @@ impl Workbench {
                         )
                     })),
             )
-            .child(
-                self.button("format-document", self.t("format_text"))
-                    .tooltip(self.t("format_text_hint"))
-                    .disabled(doc.formatting.is_some() || doc.saving || doc_owner != owner)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.format_document(owner, id, window, cx)
-                    })),
-            );
+            .when(preview, |bar| {
+                bar.child(
+                    self.button("edit-from-preview", self.t("edit"))
+                        .tooltip(self.t("edit_from_preview_hint"))
+                        .disabled(!can_edit || doc_owner != owner)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.promote_preview_to_edit(owner, id, window, cx)
+                        })),
+                )
+            })
+            .when(!preview, |bar| {
+                bar.child(
+                    self.button("format-document", self.t("format_text"))
+                        .tooltip(self.t("format_text_hint"))
+                        .disabled(doc.formatting.is_some() || doc.saving || doc_owner != owner)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.format_document(owner, id, window, cx)
+                        })),
+                )
+            });
         toolbar
     }
 }

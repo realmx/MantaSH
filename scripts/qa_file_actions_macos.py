@@ -43,6 +43,10 @@ class FileActionsAcceptance(FileRowsAcceptance):
         self.direct("a.txt", "copy")
         self.check(self.selected() == ["b.txt", "c.txt"], "Copy row button does not change multiselection")
         self.check(self.state()["file_operations"]["clipboard"] == [str(remote / "a.txt")], "Copy captures only its own row")
+        self.direct("a.txt", "preview")
+        self.check(self.selected() == ["b.txt", "c.txt"], "Preview row button does not change multiselection")
+        self.wait(lambda s: s["modal"] == "editor" and s.get("editor", {}).get("preview") is True, "Preview opens read-only editor")
+        self.action("keystroke", key="escape")
         old_request = self.pane(self.state())["file_request"]
         self.directory(remote / "destination")
         self.action("paste_files")

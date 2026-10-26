@@ -15,6 +15,19 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
 pub const EDIT_LIMIT: u64 = 8_000_000;
+
+/// How the UI asked to open a remote file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OpenIntent {
+    /// Prefer an editable document; reject lossy-only decodes.
+    Edit,
+    /// Always open read-only; allow lossy fallback for allowlisted names.
+    Preview,
+    /// Double-click: editable when safe, otherwise preview if allowlisted lossy works.
+    #[default]
+    Auto,
+}
+
 #[derive(Debug, Clone)]
 pub struct FileEntry {
     pub name: String,
@@ -65,6 +78,10 @@ pub struct OpenedFile {
     pub encoding: Encoding,
     pub bom: bool,
     pub stamp: Stamp,
+    /// True when decode used replacement characters or Latin-1 mapping; must not be saved.
+    pub lossy: bool,
+    /// UI should present a read-only preview (explicit preview intent or lossy decode).
+    pub read_only: bool,
 }
 #[derive(Debug, Clone)]
 pub enum SaveResult {
@@ -636,17 +653,31 @@ async fn read_bounded(sftp: &SftpSession, path: &str) -> Result<(Vec<u8>, Stamp)
     Ok((bytes, stamp))
 }
 
-/// Read and decode strictly; invalid bytes and binary files never become editable replacement text.
-pub async fn open(remote: &Remote, path: &str, requested: Option<Encoding>) -> Result<OpenedFile> {
+/// Read and decode for in-app open/preview. Invalid bytes and true binaries never become
+/// silently editable text; allowlisted names may use encoding fallbacks (see `encoding`).
+pub async fn open(
+    remote: &Remote,
+    path: &str,
+    requested: Option<Encoding>,
+    intent: OpenIntent,
+) -> Result<OpenedFile> {
     let sftp = remote.sftp().await?;
     let (bytes, stamp) = read_bounded(&sftp, path).await?;
-    let text = encoding::decode_file(&bytes, requested)?;
+    let allow_lossy = matches!(intent, OpenIntent::Preview | OpenIntent::Auto);
+    let (text, lossy) = encoding::decode_for_open(&bytes, path, requested, allow_lossy)?;
+    if lossy && intent == OpenIntent::Edit {
+        bail!("Invalid UTF-8 text; choose the correct file encoding");
+    }
+    // Auto with a lossy-only decode becomes a preview. Explicit Preview is always read-only.
+    let read_only = lossy || intent == OpenIntent::Preview;
     Ok(OpenedFile {
         path: path.into(),
         text: text.text,
         encoding: text.encoding,
         bom: text.bom,
         stamp,
+        lossy,
+        read_only,
     })
 }
 
@@ -711,6 +742,9 @@ pub async fn save(
     encoding: Encoding,
     _force: bool,
 ) -> Result<SaveResult> {
+    if document.lossy || document.read_only {
+        bail!("Read-only preview cannot be saved");
+    }
     let bytes = encoding::encode(text, encoding, document.bom)?;
     if bytes.len() as u64 > EDIT_LIMIT {
         bail!("Encoded file exceeds 8 MB");

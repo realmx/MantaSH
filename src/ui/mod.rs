@@ -72,7 +72,7 @@ mod window_native;
 
 use crate::{
     events::Event,
-    files::{FileEntry, OpenedFile, SaveResult},
+    files::{FileEntry, OpenIntent, OpenedFile, SaveResult},
     layout::{MAX_LOCAL_PANES, PaneLayout},
     model::*,
     monitor::Sample,
@@ -146,7 +146,7 @@ pub(super) struct FileTool {
     request: Option<Id>,
     loading: bool,
     loaded: bool,
-    link_target: Option<(String, String, bool)>,
+    link_target: Option<(String, String, bool, OpenIntent)>,
     error: Option<String>,
     show_hidden: bool,
     scroll: ScrollHandle,
@@ -194,6 +194,8 @@ pub(super) struct Document {
     encoding: crate::encoding::Encoding,
     revision: u64,
     dirty: bool,
+    /// Read-only preview: input disabled, save/format hidden. Lossy opens always preview.
+    preview: bool,
     /// Latest remote read request for this document. Older responses are
     /// ignored so a rapid reopen cannot restore stale content.
     open_request: Option<Id>,
@@ -240,7 +242,7 @@ pub(super) struct Pane {
     last_sample: Instant,
     /// Pending file reads keyed by request; the value identifies the document
     /// to refresh, or None when the first instance is still being created.
-    opened_requests: HashMap<Id, (String, Option<Id>)>,
+    opened_requests: HashMap<Id, (String, Option<Id>, OpenIntent)>,
     /// Latest request per path; older responses are discarded.
     open_latest: HashMap<String, Id>,
 }
@@ -1019,11 +1021,23 @@ impl Workbench {
         _remember: bool,
         cx: &mut Context<Self>,
     ) -> Entity<TerminalView> {
-        let session = self.backend.start(
+        self.start_terminal_with_buffer(owner, spec, secret, _remember, None, cx)
+    }
+    fn start_terminal_with_buffer(
+        &mut self,
+        owner: Owner,
+        spec: SessionSpec,
+        secret: String,
+        _remember: bool,
+        terminal: Option<std::sync::Arc<parking_lot::Mutex<crate::terminal::TerminalBuffer>>>,
+        cx: &mut Context<Self>,
+    ) -> Entity<TerminalView> {
+        let session = self.backend.start_with_terminal(
             owner,
             spec,
             zeroize::Zeroizing::new(secret),
             self.prefs.remember_credentials,
+            terminal,
         );
         let terminal = cx.new(|cx| TerminalView::new(session, self.prefs.clone(), cx));
         self.subscriptions
@@ -1157,12 +1171,24 @@ impl Workbench {
         if prompt_modal {
             self.dismiss(window, cx);
         }
+        // Preserve the existing SSH grid across attempts: close the old attempt
+        // first so its feed cannot race, push the viewport into scrollback, then
+        // hand the same buffer to the new Session.
+        let preserved = self.pane(old).and_then(|pane| {
+            pane.terminal
+                .as_ref()
+                .map(|terminal| terminal.read(cx).session.terminal.clone())
+        });
         self.backend.close(old);
+        if let Some(buffer) = &preserved {
+            buffer.lock().prepare_reconnect();
+        }
         let owner = Owner {
             session: old.session,
             attempt: Id::new_v4(),
         };
-        let terminal = self.start_terminal(owner, spec.clone(), secret, remember, cx);
+        let terminal =
+            self.start_terminal_with_buffer(owner, spec.clone(), secret, remember, preserved, cx);
         if let Some(pane) = self.pane_mut(old) {
             pane.spec = spec;
             pane.owner = owner;
@@ -1876,7 +1902,7 @@ impl Workbench {
                 target,
                 directory,
             } => {
-                let Some((pending_path, _target_id)) = self
+                let Some((pending_path, _target_id, intent)) = self
                     .pane_mut(owner)
                     .and_then(|pane| pane.opened_requests.remove(&request))
                 else {
@@ -1891,7 +1917,7 @@ impl Workbench {
                 }
                 if let Some(pane) = self.pane_mut(owner) {
                     pane.open_latest.remove(&pending_path);
-                    pane.files.link_target = Some((path, target, directory));
+                    pane.files.link_target = Some((path, target, directory, intent));
                 }
             }
             Event::FileOpened {
@@ -1899,7 +1925,7 @@ impl Workbench {
                 request,
                 result,
             } => {
-                let Some((pending_path, target_id)) = self
+                let Some((pending_path, target_id, _intent)) = self
                     .pane_mut(owner)
                     .and_then(|pane| pane.opened_requests.remove(&request))
                 else {
@@ -2151,12 +2177,24 @@ impl Workbench {
             Event::Error(error) => self.notice = Some(error),
             Event::Output(owner) => {
                 // Hidden tabs retain one pending wakeup until their next paint; their output is still parsed.
+                // During reconnect the new attempt lives on pending_terminal until Connected swaps it in.
                 if self
                     .tabs
                     .get(self.active)
                     .is_some_and(|tab| tab.panes.iter().any(|p| p.owner == owner))
                 {
-                    if let Some(terminal) = self.pane(owner).and_then(|p| p.terminal.clone()) {
+                    let terminals: Vec<_> = self
+                        .pane(owner)
+                        .map(|p| {
+                            p.pending_terminal
+                                .iter()
+                                .chain(p.terminal.iter())
+                                .cloned()
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let mut refresh = false;
+                    for terminal in terminals {
                         let pending = terminal.update(cx, |t, cx| {
                             let pending = t.session.output_wakeup.pending();
                             if pending {
@@ -2164,9 +2202,10 @@ impl Workbench {
                             }
                             pending
                         });
-                        if pending {
-                            window.refresh();
-                        }
+                        refresh |= pending;
+                    }
+                    if refresh {
+                        window.refresh();
                     }
                 }
                 return;

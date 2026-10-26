@@ -92,6 +92,7 @@ pub(super) enum Modal {
         link: String,
         target: String,
         directory: bool,
+        intent: crate::files::OpenIntent,
     },
     Profile(ProfileForm),
     Settings,
@@ -3011,6 +3012,7 @@ impl Workbench {
                 link,
                 target,
                 directory,
+                intent,
             } => {
                 title = self.t("review_target").into();
                 body = body
@@ -3020,6 +3022,7 @@ impl Workbench {
                 let owner = *owner;
                 let target = target.clone();
                 let directory = *directory;
+                let intent = *intent;
                 footer = footer.child(
                     self.button("follow-link", self.t("open"))
                         .disabled(
@@ -3035,7 +3038,7 @@ impl Workbench {
                             if directory {
                                 this.navigate(owner, Some(target.clone()), cx);
                             } else {
-                                this.open_document(owner, target.clone(), w, cx);
+                                this.open_document(owner, target.clone(), intent, w, cx);
                             }
                         })),
                 );
@@ -3506,7 +3509,11 @@ impl Workbench {
                 );
             }
             Modal::Editor { owner } => {
-                title = self.t("editor").into();
+                let preview = self.pane(*owner).is_some_and(|pane| {
+                    pane.active_document
+                        .is_some_and(|id| pane.documents.iter().any(|d| d.id == id && d.preview))
+                });
+                title = self.t(if preview { "preview" } else { "editor" }).into();
                 // The action row lives in the footer (file name left, actions
                 // right); leaving a document stays on the header close button,
                 // so the footer itself carries no close action.

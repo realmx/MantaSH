@@ -165,8 +165,8 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "file_navigation" => ("浏览与选择", "Browse and select"),
         "file_transfer_options" => ("传输与编码", "Transfers and encoding"),
         "reconnect_output_hint" => (
-            "旧输出已保留，可重新连接继续工作",
-            "Previous output is retained. Reconnect to continue",
+            "旧输出已保留，重连成功后仍可滚动查看",
+            "Previous output is kept and remains scrollable after reconnect",
         ),
         "retry_in_progress" => ("正在重新连接…", "Reconnecting…"),
         "connection_error_details" => ("连接详情", "Connection details"),
@@ -346,6 +346,16 @@ pub fn text(language: Language, key: &str) -> &'static str {
         "save_connect" => ("保存并连接", "Save & connect"),
         "save_only" => ("仅保存", "Save only"),
         "edit" => ("编辑", "Edit"),
+        "preview" => ("预览", "Preview"),
+        "preview_readonly" => ("只读预览", "Read-only preview"),
+        "preview_lossy" => (
+            "已用替换字符解码，仅可预览，不可保存",
+            "Decoded with replacement characters; preview only, cannot save",
+        ),
+        "edit_from_preview_hint" => (
+            "在可安全编辑时切换到编辑模式",
+            "Switch to edit mode when the file can be saved safely",
+        ),
         "delete" => ("删除", "Delete"),
         "new_instance" => ("新开会话", "Open another session"),
         "name" => ("名称", "Name"),

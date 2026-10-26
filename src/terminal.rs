@@ -242,6 +242,34 @@ impl TerminalBuffer {
         self.prompt_touched = false;
         self.prompt_submitted = false;
     }
+    /// Keep scrollback and the current screen for a new SSH attempt.
+    ///
+    /// Exits the alternate screen if needed and pushes the primary viewport into
+    /// scrollback. Only that grid survives: parsers, modes, cursor state and queued
+    /// terminal events belong to the old attempt. Remote clear or MOTD after login
+    /// remains remote behaviour.
+    pub fn prepare_reconnect(&mut self) {
+        if self.term.mode().contains(TermMode::ALT_SCREEN) {
+            self.term.swap_alt();
+        }
+        ansi::Handler::clear_screen(&mut self.term, ansi::ClearMode::All);
+        self.term.scroll_display(Scroll::Bottom);
+
+        // A terminal reset would erase history too. Move the retained grid into
+        // a fresh terminal instead, resetting its public cursor/template fields
+        // and blank viewport so attributes, charsets and saved cursor cannot leak.
+        // The fresh terminal starts fully damaged at the same dimensions.
+        let mut fresh = Self::new(self.encoding);
+        fresh.local = self.local;
+        fresh.resize(self.size.cols, self.size.rows);
+        let grid = self.term.grid_mut();
+        grid.cursor = Default::default();
+        grid.saved_cursor = Default::default();
+        grid.reset_region(..);
+        std::mem::swap(fresh.term.grid_mut(), grid);
+        fresh.revision = self.revision.wrapping_add(1);
+        *self = fresh;
+    }
     /// Split at viewport erases so local ED2 does not manufacture scrollback.
     /// Explicit saved-history erase retains its existing cross-chunk semantics.
     fn advance_ansi(&mut self, bytes: &[u8]) {
