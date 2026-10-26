@@ -4,6 +4,7 @@
 
 ## 当前源码变更
 
+- 编辑/预览弹窗顶部工具栏（文件路径、编码、格式化/编辑按钮）补上与标题栏和底栏一致的内边距：左右 12px（`theme::SPACE_PANEL`）、顶部 8px（`theme::SPACE_CONTROL`），不再贴着弹窗边缘。
 - 文件列表名称后各列之间的间距固定为 4px（`theme::SPACE_SMALL`）：大小列到修改时间列、修改时间列到操作列不再随面板宽度在 8px/12px 间切换。
 - SFTP 文件列表增加行内预览（Lucide `eye`）与右键“预览/编辑”，动作列改为六个按钮（默认 140px）；放宽文本/日志/配置的打开检测（允许 ANSI ESC 等无害控制字符、扩展名与常见文件名允许列表，UTF-8 失败时尝试 GBK/GB18030，预览可用替换字符回退且不可保存），并区分只读预览与可编辑模式（脏草稿优先打开编辑草稿）。补充允许列表、控制字符、编码回退与预览门禁测试及文档。
 
@@ -105,6 +106,36 @@ MantaSH 首个公开产品版本，包含：
 ## 逐次提交记录（自动生成）
 
 本区由提交前钩子按 Git 完整历史自动生成，随每次提交写入，覆盖到该提交的上一提交（最新一条在下次提交时补入）；包含普通提交、合并和文档更新，仅省略旧版 Actions 机器人的日志同步提交。日期为提交日期，正文保留原始说明，不代表对应版本已经发布或通过平台验收。
+
+### 2026-10-26
+
+- **增加文件只读预览并保留 SSH 重连历史** · [cd17166](https://github.com/realmx/MantaSH/commit/cd171660c93ac2606511cd7742e8a4a436dd76d8)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+文件列表增加行内预览和右键预览/编辑入口，打开意图贯穿符号链接确认与异步读取。只读预览禁用正文修改、保存和格式化；无损预览可切换为编辑，已有未保存草稿优先保留，后端同步拒绝保存只读或有损内容。
+
+扩展日志、配置与常见文本文件名识别，允许 ANSI 控制字符，在 UTF-8 失败时尝试 GBK/GB18030；允许的文本仅在预览路径使用有损回退，继续拒绝 NUL 和明显二进制。文件操作列增加预览按钮，大小、修改时间与操作列之间统一使用 4px 间距。
+
+SSH 原标签重连复用终端缓冲，把原视口保留到滚动历史并处理待连接终端的输出通知；重置旧 ANSI 解析状态、终端模式和光标状态，并在持有终端锁时复核取消，隔离迟到的旧连接输出。补充文本解码、重连历史与真实 SFTP 接口测试，扩展 macOS 文件预览 QA，并同步功能、使用、数据、架构、设计、开发、故障排查及验收文档。
+
+验证通过：
+- cargo fmt --all -- --check
+- cargo test --locked --no-default-features --all-targets
+- cargo check --locked --no-default-features --all-targets
+- cargo check --locked --all-targets
+- cargo test --locked --no-default-features --test terminal_updates prepare_reconnect
+- cargo test --locked --no-default-features --lib cancelled_feed_waiting_for_grid_cannot_mutate_reconnected_buffer
+- python3 scripts/check_docs.py
+- Python AST 语法检查：scripts/qa_file_actions_macos.py
+- git diff --check
+
+本次未运行原生窗口 QA、指针/键盘驱动验收、Windows 实机或新增 Linux 远程验证。原生 UI fixture 按默认配置忽略；编译仍有现有未使用项、依赖弃用及未来兼容警告。
+```
+
+</details>
 
 ### 2026-10-24
 

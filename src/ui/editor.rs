@@ -99,7 +99,15 @@ impl Workbench {
         cx.notify();
     }
     pub(super) fn editor_toolbar(&self, owner: Owner, cx: &mut Context<Self>) -> Div {
-        let mut toolbar = div().flex().items_center().gap(px(theme::SPACE_CONTROL));
+        // The editor dialog body has no generic padding (the editor fills it
+        // edge to edge), so the toolbar insets itself to line up with the
+        // header and footer.
+        let mut toolbar = div()
+            .flex()
+            .items_center()
+            .gap(px(theme::SPACE_CONTROL))
+            .px(px(theme::SPACE_PANEL))
+            .pt(px(theme::SPACE_CONTROL));
         let Some(doc) = self.pane(owner).and_then(|pane| {
             pane.documents
                 .iter()
