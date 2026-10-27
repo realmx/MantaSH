@@ -496,6 +496,19 @@ pub fn text(language: Language, key: &str) -> &'static str {
             "原连接已失效。请复制草稿，在有效连接中重新打开文件。",
             "The original connection is unavailable. Copy this draft and reopen the file in a live connection.",
         ),
+        "editor_connection_lost" => (
+            "连接未就绪，暂不能保存。重连成功后可继续编辑并保存。",
+            "Not connected; saving is unavailable. Reconnect to continue editing and save.",
+        ),
+        "editor_stale_draft" => (
+            "此草稿来自重连前的连接。点击“在当前连接继续编辑”后即可保存。",
+            "This draft is from before the reconnect. Choose “Continue on current connection” to save it.",
+        ),
+        "editor_continue" => ("在当前连接继续编辑", "Continue on current connection"),
+        "editor_continue_hint" => (
+            "改由当前连接保存此草稿；保存仍会覆盖远端文件的当前内容",
+            "Save this draft through the current connection; saving still replaces the current remote file contents",
+        ),
         "saved" => ("已保存", "Saved"),
         "discard" => ("放弃修改", "Discard changes"),
         "keep_editing" => ("继续编辑", "Keep editing"),

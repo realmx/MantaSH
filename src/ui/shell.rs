@@ -1590,11 +1590,17 @@ impl Workbench {
         // The header carries the full path, so the footer omits the file
         // name; the dirty marker and save/disconnect/preview feedback stay visible.
         let preview = doc.preview;
-        let error_status = doc.error.is_some()
-            || doc.owner != pane.owner
-            || pane.state != ConnectionState::Connected;
+        let binding = Self::binding_of(pane, doc);
+        let connected = pane.state == ConnectionState::Connected;
+        let can_continue = binding == (editor::DocumentBinding::StaleDraft { can_continue: true });
+        let writable = binding == editor::DocumentBinding::Current && connected;
+        let error_status = doc.error.is_some() || !writable;
         let status = doc.error.clone().or_else(|| {
-            if doc.owner != pane.owner || pane.state != ConnectionState::Connected {
+            if can_continue {
+                Some(self.t("editor_stale_draft").to_string())
+            } else if !connected {
+                Some(self.t("editor_connection_lost").to_string())
+            } else if binding != editor::DocumentBinding::Current {
                 Some(self.t("editor_disconnected").to_string())
             } else if preview && doc.original.lossy {
                 Some(self.t("preview_lossy").to_string())
@@ -1615,25 +1621,39 @@ impl Workbench {
                 )
             })
             .when_some(status, |row, status| {
+                // Status text wraps instead of being clipped so the full
+                // instruction stays readable at every dialog width.
                 row.child(
                     div()
                         .min_w_0()
                         .flex_1()
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .whitespace_nowrap()
                         .text_color(if error_status { p.error } else { p.muted })
                         .child(status),
                 )
             })
             .when(!has_status, |row| row.child(div().flex_1()))
+            .when(can_continue, |row| {
+                row.child(
+                    self.button(
+                        ("continue-document", id.as_u128() as u64),
+                        self.t("editor_continue"),
+                    )
+                    .warning()
+                    .tooltip(self.t("editor_continue_hint"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.continue_document_on_current(owner, id, window, cx)
+                    })),
+                )
+            })
             .when(!preview, |row| {
+                // Close by the document's own owner so a draft from an
+                // earlier attempt can still be discarded.
                 row.child(
                     self.button("discard-draft", self.t("discard_draft"))
                         .danger()
                         .disabled(doc.saving || !doc.dirty)
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.request_close(CloseTarget::Document(owner, id), window, cx)
+                            this.request_close(CloseTarget::Document(doc_owner, id), window, cx)
                         })),
                 )
                 .child(
@@ -1643,11 +1663,7 @@ impl Workbench {
                     )
                     .success()
                     .tooltip(self.t("save_overwrites"))
-                    .disabled(
-                        doc.saving
-                            || doc.owner != pane.owner
-                            || pane.state != ConnectionState::Connected,
-                    )
+                    .disabled(doc.saving || !writable)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.save_document(doc_owner, id, false, cx)
                     })),

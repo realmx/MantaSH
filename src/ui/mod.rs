@@ -187,7 +187,11 @@ pub(super) struct FileTool {
     after_listing: Option<ListingFollowUp>,
 }
 pub(super) struct Document {
+    /// Attempt that read this document. Reconnect never moves it implicitly;
+    /// only an explicit continue on a matching endpoint rebinds a draft.
     owner: Owner,
+    /// Host, port and username the document was read from (SSH only).
+    endpoint: Option<editor::DocumentEndpoint>,
     id: Id,
     original: OpenedFile,
     input: Entity<InputState>,
@@ -729,6 +733,16 @@ impl Workbench {
             .flat_map(|p| &mut p.documents)
             .find(|d| d.id == id && d.owner == owner)
     }
+    /// Find a document by its unique ID regardless of the attempt it is
+    /// bound to; used by the input subscription so a rebound draft keeps
+    /// tracking edits.
+    pub(super) fn document_by_id_mut(&mut self, id: Id) -> Option<&mut Document> {
+        self.tabs
+            .iter_mut()
+            .flat_map(|t| &mut t.panes)
+            .flat_map(|p| &mut p.documents)
+            .find(|d| d.id == id)
+    }
     pub(super) fn changed(&mut self, cx: &mut Context<Self>) {
         self.preferences_dirty = Some(Instant::now());
         cx.notify();
@@ -1215,14 +1229,25 @@ impl Workbench {
                 document.save_snapshot = None;
                 document.formatting = None;
             }
+            // Clean documents hold no user changes; drop them so the next
+            // open reads fresh content through the new attempt instead of
+            // surfacing an unsavable leftover. Unsaved drafts stay until the
+            // user continues on the new connection or discards them.
+            pane.documents.retain(|document| document.dirty);
+            if pane
+                .active_document
+                .is_some_and(|id| !pane.documents.iter().any(|document| document.id == id))
+            {
+                pane.active_document = pane.documents.last().map(|document| document.id);
+            }
             pane.monitor_request = None;
             pane.monitor_error = None;
             pane.port_expanded.clear();
             pane.process_attempts.clear();
         }
-        // The editor dialog points at the pre-reconnect owner; its stale
-        // documents stay read-only, so close it instead of keeping a
-        // dialog that can no longer find its pane.
+        // The editor dialog points at the pre-reconnect owner; close it
+        // instead of keeping a dialog that can no longer find its pane.
+        // Remaining drafts stay unsavable until explicitly continued.
         if matches!(&self.modal, Some(Modal::Editor { owner }) if *owner == old) {
             self.editor_return = None;
             self.dismiss(window, cx);

@@ -72,7 +72,7 @@ cargo test --locked --lib ui::controls::tests
 cargo test --locked --lib ui::updates::tests
 ```
 
-前者覆盖五种按钮 tone、主题对比度、外观组合和禁用状态，后者覆盖手动/自动检查、重复请求、取消与迟到回复。Switch 的焦点与完整按下/抬起周期、编辑事务的原生撤销/重做则使用下面的专项 QA。
+前者覆盖五种按钮 tone、主题对比度、外观组合和禁用状态，后者覆盖手动/自动检查、重复请求、取消与迟到回复。`cargo test --locked --lib ui::editor::tests` 覆盖重连后文档的复用、重新读取与改绑判定。Switch 的焦点与完整按下/抬起周期、编辑事务的原生撤销/重做则使用下面的专项 QA。
 
 `ssh_sftp` 在回环地址启动随机口令/密钥的测试服务器，SFTP 桥接系统 OpenSSH，读写真实临时文件；这是测试工具，正式应用只作 SSH 客户端。`processes` 的 Linux 条件测试仅操作自己创建的 `sleep 30` 子进程。新增 Linux 验证只使用用户指定的远程环境，禁止创建或运行本地 Linux VM/容器。Windows x86/x64/ARM64、ConPTY、DPI、输入法和安装体验仍未实机验收。
 
@@ -147,7 +147,7 @@ macOS 的 `/var` 与 `/private/var` 必须统一为解析后的路径。`stage_t
 | 脚本 | 启动方式与依赖 | 覆盖与限制 |
 |---|---|---|
 | [qa_smoke.py](../scripts/qa_smoke.py) | 现有窗口 + fixture；部分断言待适配 | 先准备第一个标签的 10 个本地窗格、第二个已信任并认证的回环 SSH 标签；分屏、面板、SFTP 与草稿冒烟，保留旧工作页断言 |
-| [qa_accept_macos.py](../scripts/qa_accept_macos.py) | 现有窗口 + fixture；`exercise` / `restore`，部分断言待适配 | 组合输入、十窗格、文件重读/覆盖和恢复场景；两阶段间实际退出并重启，编辑器工作页断言需适配当前弹窗 |
+| [qa_accept_macos.py](../scripts/qa_accept_macos.py) | 现有窗口 + fixture；`exercise` / `restore`，部分断言待适配 | 组合输入、十窗格、文件重读/覆盖、重连后旧草稿改绑保存与干净文档重新读取和恢复场景；两阶段间实际退出并重启，编辑器工作页断言需适配当前弹窗 |
 | [qa_completion_macos.py](../scripts/qa_completion_macos.py) | 现有窗口，真实本地 Shell | 文件/中文路径/目录/命令补全、前台 Backtab、组合输入保护及表单导航 |
 | [qa_tabs_macos.py](../scripts/qa_tabs_macos.py) | 现有窗口 | 动态名称、滚动边界、后台输出、活动标签及窗口尺寸；几何来自原生预绘制 |
 | [qa_tab_reorder_macos.py](../scripts/qa_tab_reorder_macos.py) | 自行启动 | 排序、栏外/Esc 取消、关闭、滚动、字号和保存；先等待 AppKit 查询原生区域，再比较 GPUI 边界及投递指针事件 |

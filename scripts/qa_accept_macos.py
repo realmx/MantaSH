@@ -6,6 +6,7 @@ QA process between the exercise and restore phases. The runner uses
 real PTY/SFTP and native view actions; it does not represent OS event injection.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -215,7 +216,31 @@ class Acceptance:
         self.wait(lambda s: pane(s)["state"] == "Connected" and pane(s)["attempt"] != attempt, "重连更换尝试标识且保留窗格")
         self.check(pane(self.state())["documents"][0]["dirty"], "重连不丢失旧连接草稿")
         self.action("open", path=str(path))
-        self.wait(lambda s: len(pane(s)["documents"]) == 2, "重连后重新打开使用独立文档归属")
+        self.wait(lambda s: s["modal"] == "editor" and len(pane(s)["documents"]) == 1 and
+                  s["editor"]["stale"] and s["editor"]["can_continue"],
+                  "重连后重新打开回到旧草稿并提供在当前连接继续编辑")
+        self.action("save")
+        self.check(path.read_text() == draft and self.state()["editor"]["dirty"],
+                   "未改绑的旧草稿不能保存")
+        self.action("editor_continue")
+        self.wait(lambda s: not s["editor"]["stale"] and s["editor"]["attempt"] == pane(s)["attempt"],
+                  "旧草稿显式改绑到当前连接")
+        self.action("save")
+        self.wait(lambda s: not pane(s)["documents"][0]["dirty"] and not pane(s)["documents"][0]["saving"],
+                  "改绑后经保护式保存写入")
+        self.check(path.read_text() == "unsaved before reconnect\n", "改绑草稿保存内容在服务器回读一致")
+        attempt = pane(self.state())["attempt"]
+        self.action("dismiss")
+        self.action("reconnect")
+        self.wait(lambda s: pane(s)["state"] == "Connected" and pane(s)["attempt"] != attempt and
+                  not pane(s)["documents"], "重连丢弃旧连接的干净文档")
+        path.write_text("changed while reconnecting\n")
+        self.action("open", path=str(path))
+        self.wait(lambda s: len(pane(s)["documents"]) == 1 and
+                  pane(s)["documents"][0]["attempt"] == pane(s)["attempt"] and
+                  s["editor"]["sha256"] == hashlib.sha256(b"changed while reconnecting\n").hexdigest(),
+                  "重连后重新打开经当前连接读取最新内容")
+        self.action("edit", text="unsaved after reconnect\n")
         self.action("close_tab", index=1)
         self.wait(lambda s: s["modal"] == "close", "关闭会话列出未保存文档影响")
         self.action("dismiss")

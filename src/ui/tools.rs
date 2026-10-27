@@ -292,7 +292,28 @@ impl Workbench {
         if self.file_path_busy(owner, &path) {
             return;
         }
-        // A dirty edit draft always wins: never open a conflicting remote preview.
+        // A clean document left by an earlier attempt is never reused: drop
+        // it so the fresh read below goes through the current attempt.
+        if let Some(pane) = self.pane_mut(owner) {
+            let stale: Vec<Id> = pane
+                .documents
+                .iter()
+                .filter(|doc| {
+                    doc.original.path == path
+                        && Self::binding_of(pane, doc) == editor::DocumentBinding::StaleClean
+                })
+                .map(|doc| doc.id)
+                .collect();
+            if !stale.is_empty() {
+                pane.documents.retain(|doc| !stale.contains(&doc.id));
+                if pane.active_document.is_some_and(|id| stale.contains(&id)) {
+                    pane.active_document = pane.documents.last().map(|doc| doc.id);
+                }
+            }
+        }
+        // A dirty edit draft always wins: never open a conflicting remote
+        // preview. An earlier attempt's draft is shown as-is; the editor
+        // offers to continue it on the current connection when safe.
         if let Some(id) = self.pane(owner).and_then(|pane| {
             pane.documents
                 .iter()
@@ -379,7 +400,9 @@ impl Workbench {
         self.subscriptions.push(
             cx.subscribe(&input, move |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
-                    if let Some(doc) = this.document_mut(owner, id) {
+                    // Look up by ID only: an explicit continue may rebind the
+                    // draft to a newer attempt after this subscription exists.
+                    if let Some(doc) = this.document_by_id_mut(id) {
                         if doc.reverting {
                             // The Change arrives deferred after a close-with-
                             // discard rewrote the buffer; it restores the
@@ -397,8 +420,10 @@ impl Workbench {
         );
         if let Some(pane) = self.pane_mut(owner) {
             let preview = file.read_only;
+            let endpoint = editor::DocumentEndpoint::of(&pane.spec);
             pane.documents.push(Document {
                 owner,
+                endpoint,
                 id,
                 original: file,
                 input,
