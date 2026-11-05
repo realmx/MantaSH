@@ -494,16 +494,9 @@ impl Workbench {
                             area.move_to(
                                 bounds.origin + point(px(segment[0].0 * width), px(height - 1.)),
                             );
-                            for (x, y) in segment {
-                                area.line_to(
-                                    bounds.origin
-                                        + point(
-                                            px(x.clamp(0., 1.) * width),
-                                            px((1. - (y / maximum.max(1.)).clamp(0., 1.))
-                                                * (height - 2.)
-                                                + 1.),
-                                        ),
-                                );
+                            for &(x, y) in segment {
+                                let (x, y) = plot_point(x, y, maximum, width, height);
+                                area.line_to(bounds.origin + point(px(x), px(y)));
                             }
                             area.line_to(
                                 bounds.origin
@@ -519,13 +512,9 @@ impl Workbench {
                         } else {
                             PathBuilder::stroke(px(2.))
                         };
-                        for (i, (x, y)) in segment.iter().enumerate() {
-                            let point = bounds.origin
-                                + point(
-                                    px(x.clamp(0., 1.) * width),
-                                    px((1. - (y / maximum.max(1.)).clamp(0., 1.)) * (height - 2.)
-                                        + 1.),
-                                );
+                        for (i, &(x, y)) in segment.iter().enumerate() {
+                            let (x, y) = plot_point(x, y, maximum, width, height);
+                            let point = bounds.origin + point(px(x), px(y));
                             if i == 0 {
                                 line.move_to(point);
                             } else {
@@ -533,14 +522,17 @@ impl Workbench {
                             }
                         }
                         if segment.len() == 1 {
+                            // An isolated sample is centred on the same mapped point the
+                            // line would use, and kept inside the plot at either edge.
                             let (x, y) = segment[0];
-                            let position = bounds.origin
-                                + point(
-                                    px(x * width - 2.),
-                                    px((1. - y / maximum.max(1.)) * height),
-                                );
+                            let (x, y) = plot_point(x, y, maximum, width, height);
+                            let x = (x - 1.5).clamp(0., (width - 3.).max(0.));
+                            let y = (y - 1.5).clamp(0., (height - 3.).max(0.));
                             window.paint_quad(fill(
-                                Bounds::new(position, size(px(3.), px(3.))),
+                                Bounds::new(
+                                    bounds.origin + point(px(x), px(y)),
+                                    size(px(3.), px(3.)),
+                                ),
                                 *color,
                             ));
                         }
@@ -2063,5 +2055,33 @@ impl Workbench {
                 .children(rows),
         )
         .into_any_element()
+    }
+}
+
+/// Map a trend sample (`x` as window fraction, `y` in data units) into plot pixels.
+///
+/// Lines, the receive fill and isolated-sample dots share this mapping so a
+/// single point renders at the same height its line would, inside the 1px
+/// inset that keeps the 2px stroke visible at the top and bottom edges.
+fn plot_point(x: f32, y: f32, maximum: f32, width: f32, height: f32) -> (f32, f32) {
+    (
+        x.clamp(0., 1.) * width,
+        (1. - (y / maximum.max(1.)).clamp(0., 1.)) * (height - 2.) + 1.,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plot_point;
+
+    #[test]
+    fn trend_points_stay_inside_the_plot_at_true_height() {
+        // Zero traffic sits on the bottom inset, not below the plot.
+        assert_eq!(plot_point(0.5, 0., 1024., 200., 56.), (100., 55.));
+        // The scale maximum reaches the top inset; larger values clamp there.
+        assert_eq!(plot_point(1., 1024., 1024., 200., 56.), (200., 1.));
+        assert_eq!(plot_point(1.2, 4096., 1024., 200., 56.), (200., 1.));
+        // Half the maximum lands halfway between the insets.
+        assert_eq!(plot_point(-0.1, 512., 1024., 200., 56.), (0., 28.));
     }
 }

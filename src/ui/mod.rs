@@ -1408,6 +1408,14 @@ impl Workbench {
                     Modal::ResourceDetails { .. } | Modal::SystemTools { .. }
                 )
             });
+        // The one pane sampled on the regular cadence this tick, mirroring the choice below.
+        let scheduled = detail_owner
+            .filter(|owner| self.pane(*owner).is_some())
+            .or_else(|| {
+                overview_visible
+                    .then(|| self.active_pane().map(|pane| pane.owner))
+                    .flatten()
+            });
         if detail_owner.is_some() || overview_visible {
             if let Some(pane) = detail_owner
                 .and_then(|owner| self.pane(owner))
@@ -1420,10 +1428,23 @@ impl Workbench {
                         .as_ref()
                         .is_none_or(|sample| sample.system == "Linux")
                     && pane.monitor_request.is_none()
-                    && pane.last_sample.elapsed() > Duration::from_secs(3)
+                    && pane.last_sample.elapsed() > crate::monitor_history::REFRESH_INTERVAL
                 {
                     self.refresh_monitor(pane.owner, cx);
                 }
+            }
+        }
+        // A pane whose refresh came due while nothing samples it keeps that
+        // interval as a trend gap, however soon sampling resumes.
+        for pane in self.tabs.iter_mut().flat_map(|tab| &mut tab.panes) {
+            if !pane.monitor_history.points.is_empty()
+                && crate::monitor_history::missed_refresh(
+                    scheduled == Some(pane.owner),
+                    pane.monitor_request.is_some(),
+                    pane.last_sample.elapsed(),
+                )
+            {
+                pane.monitor_history.interrupt();
             }
         }
         if self.active_tool() == Some(Tool::Files) {
@@ -2153,7 +2174,11 @@ impl Workbench {
                                 pane.monitor = Some(sample);
                                 pane.monitor_error = None;
                             }
-                            Err(error) => pane.monitor_error = Some(error),
+                            Err(error) => {
+                                // A failed sample leaves its interval unobserved in the trend.
+                                pane.monitor_history.interrupt();
+                                pane.monitor_error = Some(error);
+                            }
                         }
                     }
                 }
