@@ -22,6 +22,14 @@ autoload -Uz add-zsh-hook
 add-zsh-hook preexec _mantash_preexec
 _mantash_prompt_end="%{"$'\e]777;mantash-cursor;'"$MANTASH_HISTORY_TOKEN"$';ready\a'"%}"
 function _mantash_precmd() {
+  # Only SSH plain prompts get a default color; explicit theme colors win.
+  # Prompt escapes have zero display width and reset before command input.
+  if [[ ${_mantash_ssh_prompt_color:-0} == 1 && -n "$PROMPT" ]]; then
+    case "$PROMPT" in
+      *'%F'*|*'%f'*|*'%K'*|*'%k'*|*$'\e['*) ;;
+      *) PROMPT="%F{cyan}${PROMPT}%f" ;;
+    esac
+  fi
   [[ "$PROMPT" == *"$_mantash_prompt_end" ]] || PROMPT="${PROMPT}${_mantash_prompt_end}"
   printf '\033]777;mantash;%s;;%s\007' "$MANTASH_HISTORY_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\r\n')"
 }
@@ -51,6 +59,14 @@ _mantash_last_history="${_mantash_history_line%%[[:space:]]*}"
 _mantash_prompt_end='\[\e]777;mantash-cursor;'"$MANTASH_HISTORY_TOKEN"';ready\a\]'
 _mantash_cursor_supported=0
 _mantash_prompt() {
+  # SSH-only fallback for plain PS1; keep existing ANSI prompt themes intact.
+  # Readline must not count the color sequences as editable columns.
+  if [[ ${_mantash_ssh_prompt_color:-0} == 1 && -n "$PS1" ]]; then
+    case "$PS1" in
+      *'\e['*|*'\E['*|*'\033['*|*'\x1b['*|*'\x1B['*|*$'\e['*) ;;
+      *) PS1='\[\e[36m\]'"${PS1}"'\[\e[39m\]' ;;
+    esac
+  fi
   if [[ $_mantash_cursor_supported == 1 && "$PS1" != *"$_mantash_prompt_end" ]]; then PS1="${PS1}${_mantash_prompt_end}"; fi
   printf '\033]777;mantash;%s;;%s\007' "$MANTASH_HISTORY_TOKEN" "$(printf '%s' "$PWD" | base64 | tr -d '\r\n')"
   _mantash_ready=1
@@ -194,7 +210,7 @@ esac
 "#,
         token = quote(token),
         zsh_env = quote(ZSH_ENV),
-        zsh_rc = quote(ZSH_RC),
-        bash_rc = quote(BASH_RC)
+        zsh_rc = quote(&format!("_mantash_ssh_prompt_color=1\n{ZSH_RC}")),
+        bash_rc = quote(&format!("_mantash_ssh_prompt_color=1\n{BASH_RC}"))
     )
 }

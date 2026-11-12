@@ -71,6 +71,8 @@ Unix 本地 PTY 使用单一非阻塞 I/O 循环：先排空旧宽度输出，�
 
 ### Shell 报告、标题与光标
 
+SSH 的临时 Bash/Zsh rc 开启会话内提示符标色，提示符 hook 为无配色的 PS1/PROMPT 添加青色前景并在末尾恢复默认前景；转义序列使用 Shell 的零宽标记，不占行编辑列数。检测到已有 ANSI CSI 或 Zsh `%F/%f/%K/%k` 配色时保留原配置，重复 hook 不叠加颜色。此开关不导出到子进程，本地会话不启用，也不改写用户 rc 文件。
+
 `integration.rs` 通过每次连接独立 nonce 的 OSC 报告命令与提示符状态，集成脚本恢复用户 HISTFILE，不扫描用户历史文件。nonce 隔离会话和误识别，不认证恶意远端进程。Bash 已有自定义 DEBUG trap 时不覆盖；无法可靠识别新命令时不收录。PowerShell 保留原 `AddToHistoryHandler` 返回值，不持久化 MemoryOnly/SkipAdding 报告，并保守过滤敏感词；语义见 [PSReadLine 文档](https://learn.microsoft.com/en-us/powershell/module/psreadline/set-psreadlineoption#-addtohistoryhandler)。
 
 `HistoryItem` 仅含 UUID/命令，`HistoryCatalog` 以成员索引保存本地和共享 SSH 两份列表，总上限 5,000。命令首尾 trim 后在所属列表内精确去重，重复执行复用 UUID，只有可靠执行报告才置顶；搜索、复制和填入不改变顺序。格式 2 的一致备份、事务迁移及存储边界见[数据文档](data.md)。`HistoryTarget` 固定弹窗 UUID、完整 Owner 和列表范围；填入/执行还核对活动终端、连接状态与可靠提示符，隐藏父帧或迟到回调不能向其他终端提交。

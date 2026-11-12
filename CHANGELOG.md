@@ -109,6 +109,98 @@ MantaSH 首个公开产品版本，包含：
 
 本区由提交前钩子按 Git 完整历史自动生成，随每次提交写入，覆盖到该提交的上一提交（最新一条在下次提交时补入）；包含普通提交、合并和文档更新，仅省略旧版 Actions 机器人的日志同步提交。日期为提交日期，正文保留原始说明，不代表对应版本已经发布或通过平台验收。
 
+### 2026-11-05
+
+- **Merge remote-tracking branch 'origin/dependabot/cargo/russh-0.65.0'** · [2e05587](https://github.com/realmx/MantaSH/commit/2e05587f2a061d998c84de01fba90ee7097efa75)
+
+- **chore(deps): bump russh from 0.64.1 to 0.65.0** · [8797761](https://github.com/realmx/MantaSH/commit/879776183a0cee0ce9be7da0ca7ec51c584377db)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+Bumps [russh](https://github.com/warp-tech/russh) from 0.64.1 to 0.65.0.
+- [Release notes](https://github.com/warp-tech/russh/releases)
+- [Commits](https://github.com/warp-tech/russh/compare/v0.64.1...v0.65.0)
+
+---
+updated-dependencies:
+- dependency-name: russh
+  dependency-version: 0.65.0
+  dependency-type: direct:production
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+```
+
+</details>
+
+- **Merge remote-tracking branch 'origin/dependabot/cargo/pageant-0.2.5'** · [97dee56](https://github.com/realmx/MantaSH/commit/97dee56a4e27fad7127bd252a16fc6b8e87144e2)
+
+- **chore(deps): bump pageant from 0.2.3 to 0.2.5** · [0df7da3](https://github.com/realmx/MantaSH/commit/0df7da3bb90fb94146835da87977090d190c92f9)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+Bumps [pageant](https://github.com/warp-tech/russh) from 0.2.3 to 0.2.5.
+- [Release notes](https://github.com/warp-tech/russh/releases)
+- [Commits](https://github.com/warp-tech/russh/commits)
+
+---
+updated-dependencies:
+- dependency-name: pageant
+  dependency-version: 0.2.5
+  dependency-type: indirect
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+```
+
+</details>
+
+- **Merge remote-tracking branch 'origin/dependabot/cargo/rustls-0.23.46'** · [61bc735](https://github.com/realmx/MantaSH/commit/61bc7359afc20a1c5e5b3fd253c50d9a7e8a7095)
+
+### 2026-11-02
+
+- **chore(deps): bump rustls from 0.23.45 to 0.23.46** · [b840335](https://github.com/realmx/MantaSH/commit/b840335e46b25ebf90110d24ea023d2f72c6f7fb)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+Bumps [rustls](https://github.com/rustls/rustls) from 0.23.45 to 0.23.46.
+- [Release notes](https://github.com/rustls/rustls/releases)
+- [Changelog](https://github.com/rustls/rustls/blob/main/CHANGELOG.md)
+- [Commits](https://github.com/rustls/rustls/compare/v/0.23.45...v/0.23.46)
+
+---
+updated-dependencies:
+- dependency-name: rustls
+  dependency-version: 0.23.46
+  dependency-type: indirect
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+```
+
+</details>
+
+### 2026-11-05
+
+- **修复系统概览网络趋势图断线与单点显示** · [07f87c7](https://github.com/realmx/MantaSH/commit/07f87c71d6593074796e64e87aa21820513bdfe4)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+将趋势样本连续间隔阈值调整为 15 秒，兼容远端采样和 SSH 往返耗时；采样失败或错过刷新时显式中断历史分段，保留未观测区间。统一折线、填充和孤立采样点的坐标映射，确保低流量单点显示在图内。补充慢采样、采样暂停、刷新判定和绘图坐标测试，同步架构、数据文档及功能摘要。
+
+验证：python3 scripts/check_docs.py 与 git diff --cached --check 通过。Rust 格式、测试和编译检查因本机未安装 Rust 工具链而未能执行；未进行原生窗口及平台实机验收。
+```
+
+</details>
+
 ### 2026-10-27
 
 - **修复 SSH 重连后的文件编辑与草稿保存** · [cdf0ffc](https://github.com/realmx/MantaSH/commit/cdf0ffc4079e94593dbfb22bbec74b965d11dfd8)
