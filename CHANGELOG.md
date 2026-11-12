@@ -111,6 +111,17 @@ MantaSH 首个公开产品版本，包含：
 
 ### 2026-11-12
 
+- **chore: ignore local Mnemon metadata** · [c2f6d06](https://github.com/realmx/MantaSH/commit/c2f6d06bae90b275c892ff137bb7762fade231f9)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+Exclude .mnemon/ runtime memory and document metadata from Git tracking.
+```
+
+</details>
+
 - **feat(ssh): highlight plain shell prompts in cyan** · [b6b68d7](https://github.com/realmx/MantaSH/commit/b6b68d757cf304523c05f3e3bfb098f1ca3420ff)
 
 <details>

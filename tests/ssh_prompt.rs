@@ -249,7 +249,10 @@ exit
         let output = child.wait_with_output().unwrap();
         assert!(output.status.success(), "{shell:?}: {output:?}");
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("FLAG=1 CHILD=unset"), "{shell:?}: {output:?}");
+        assert!(
+            stdout.contains("FLAG=1 CHILD=unset"),
+            "{shell:?}: {output:?}"
+        );
         let stderr = String::from_utf8_lossy(&output.stderr);
         let rendered = format!("\x1b[36mremote> \x1b[39m{READY}");
         assert!(stderr.contains(&rendered), "{shell:?}: {output:?}");
