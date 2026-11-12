@@ -266,11 +266,12 @@ exit
         terminal.feed(&stderr.as_bytes()[start..start + rendered.len()]);
         assert!(terminal.command_cursor.editing(), "{shell:?}");
         terminal.feed(b"abc");
+        // The eight-column prompt puts the cursor at column 11 after "abc".
         assert_eq!(
             terminal.cursor_movement(8, 0),
-            Some(b"\x1b[D\x1b[D".to_vec()),
+            Some(b"\x1b[D\x1b[D\x1b[D".to_vec()),
             "{shell:?}"
         );
-        assert!(terminal.cursor_movement(0, 0).is_none(), "{shell:?}");
+        assert!(terminal.cursor_movement(7, 0).is_none(), "{shell:?}");
     }
 }

@@ -111,6 +111,19 @@ MantaSH 首个公开产品版本，包含：
 
 ### 2026-11-12
 
+- **fix(ci): migrate macOS runners and update SSH test callback** · [b2578cf](https://github.com/realmx/MantaSH/commit/b2578cf130567cc4c0bdf233a47c015111ff5204)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+Use macos-15 for native ARM64 builds and macos-15-intel for native x64 builds after macOS 14 runner retirement. Document the shared release/development matrix and adapt the SSH fixture to russh 0.65 VerifiedPublicKey.
+
+Validation: 31 release packaging tests, documentation validation, and whitespace checks passed. Local Rust checks remain unavailable without an installed toolchain; GitHub Actions will validate the fixture change.
+```
+
+</details>
+
 - **fix(ci): format SSH prompt regression assertion** · [aff6e32](https://github.com/realmx/MantaSH/commit/aff6e3279b0acdf5b8392b08b9b6d801d9b8304b)
 
 <details>
