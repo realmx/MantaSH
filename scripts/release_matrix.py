@@ -13,8 +13,8 @@ TARGETS = [
     {"name": "windows-x64", "os": "windows-2022", "target": "x86_64-pc-windows-msvc", "python": "python"},
     {"name": "windows-x86", "os": "windows-2022", "target": "i686-pc-windows-msvc", "python": "python"},
     {"name": "windows-arm64", "os": "windows-2022", "target": "aarch64-pc-windows-msvc", "python": "python"},
-    {"name": "macos-arm64", "os": "macos-14", "target": "aarch64-apple-darwin", "python": "python3"},
-    {"name": "macos-x64", "os": "macos-14", "target": "x86_64-apple-darwin", "python": "python3"},
+    {"name": "macos-arm64", "os": "macos-15", "target": "aarch64-apple-darwin", "python": "python3"},
+    {"name": "macos-x64", "os": "macos-15-intel", "target": "x86_64-apple-darwin", "python": "python3"},
 ]
 PLATFORMS = ("all", "windows-x64", "macos-arm64")
 

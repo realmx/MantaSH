@@ -27,6 +27,8 @@ Actions 使用 checkout 配置的任务自身 `GITHUB_TOKEN`，通过非强制 G
 git push origin master
 ```
 
+macOS ARM64 使用 `macos-15` runner，x64 使用 `macos-15-intel` runner，分别原生构建 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` 目标。构建矩阵由 [release_matrix.py](../scripts/release_matrix.py) 统一提供，tag 发布与开发构建共用这些 runner。
+
 ## 更新日志自动生成
 
 [CHANGELOG.md](../CHANGELOG.md) 包含人工维护的功能摘要与完整逐次提交记录。后者由 [update_changelog.py](../scripts/update_changelog.py) 从当前分支的全部可达 Git 历史生成，保留标题、完整正文、提交日期与链接，包含合并、空提交、文档提交和同一 push 中的每条提交；不依据标题前缀筛除变更。现有历史从仓库重建提交开始，不推断更早记录；提交原文也不代表发布或平台验收成功。

@@ -111,6 +111,17 @@ MantaSH 首个公开产品版本，包含：
 
 ### 2026-11-12
 
+- **fix(ci): format SSH prompt regression assertion** · [aff6e32](https://github.com/realmx/MantaSH/commit/aff6e3279b0acdf5b8392b08b9b6d801d9b8304b)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+Apply the multiline assertion layout reported by cargo fmt in CI. Documentation and whitespace checks pass; local Rust checks remain unavailable because no Rust toolchain is installed.
+```
+
+</details>
+
 - **chore: ignore local Mnemon metadata** · [c2f6d06](https://github.com/realmx/MantaSH/commit/c2f6d06bae90b275c892ff137bb7762fade231f9)
 
 <details>

@@ -54,12 +54,12 @@ impl server::Handler for FixtureClient {
     async fn auth_publickey(
         &mut self,
         user: &str,
-        key: &russh::keys::PublicKey,
+        key: server::VerifiedPublicKey<'_>,
     ) -> anyhow::Result<server::Auth> {
         self.config.auth_calls.fetch_add(1, Ordering::SeqCst);
         Ok(
             if user == "mantash-test"
-                && key.fingerprint(russh::keys::HashAlg::Sha256)
+                && key.public_key.fingerprint(russh::keys::HashAlg::Sha256)
                     == self
                         .config
                         .client_key
