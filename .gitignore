@@ -12,6 +12,7 @@ __pycache__/
 .zcode/
 .zcodeignore
 .pi/
+.mnemon/
 
 credentials.key
 *.sqlite3-journal

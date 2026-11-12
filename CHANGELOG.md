@@ -109,6 +109,21 @@ MantaSH 首个公开产品版本，包含：
 
 本区由提交前钩子按 Git 完整历史自动生成，随每次提交写入，覆盖到该提交的上一提交（最新一条在下次提交时补入）；包含普通提交、合并和文档更新，仅省略旧版 Actions 机器人的日志同步提交。日期为提交日期，正文保留原始说明，不代表对应版本已经发布或通过平台验收。
 
+### 2026-11-12
+
+- **feat(ssh): highlight plain shell prompts in cyan** · [b6b68d7](https://github.com/realmx/MantaSH/commit/b6b68d757cf304523c05f3e3bfb098f1ca3420ff)
+
+<details>
+<summary>完整提交说明</summary>
+
+```text
+Add session-local cyan prompts for SSH Bash and Zsh sessions, restore the default foreground before command input, and preserve explicit prompt colors. Add real-shell regression coverage and document activation and shell limits.
+
+Validation: Bash/Zsh shell output and bootstrap checks, documentation checks, and whitespace checks passed. Cargo fmt, test, and check could not run because no Rust toolchain is installed.
+```
+
+</details>
+
 ### 2026-11-05
 
 - **Merge remote-tracking branch 'origin/dependabot/cargo/russh-0.65.0'** · [2e05587](https://github.com/realmx/MantaSH/commit/2e05587f2a061d998c84de01fba90ee7097efa75)
